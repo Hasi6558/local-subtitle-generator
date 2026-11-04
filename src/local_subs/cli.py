@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 from local_subs.config import languages as supported_languages, load_settings
 from local_subs.media import inspect_media
+from local_subs.media import parse_time
 
 app = typer.Typer(no_args_is_help=True)
 models = typer.Typer(no_args_is_help=True)
@@ -24,11 +25,72 @@ def fail(exc):
 
 
 @app.command()
+def generate(
+    media: Path,
+    config: Path | None = None,
+    source_language: str | None = None,
+    target_language: str | None = None,
+    audio_stream: int | None = None,
+    model: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    output_dir: Path | None = None,
+    model_cache: Path | None = None,
+    start: str = "0",
+    duration: str | None = None,
+    vad: bool | None = typer.Option(None, "--vad/--no-vad"),
+    detection_threshold: float | None = None,
+):
+    """Generate English SRT offline, retaining the original movie timeline."""
+    from local_subs.jobs import generate as generate_job
+
+    try:
+        settings = load_settings(
+            config,
+            source_language=source_language,
+            target_language=target_language,
+            speech_model=model,
+            device=device,
+            compute_type=compute_type,
+            output_dir=output_dir,
+            model_cache=model_cache,
+            vad=vad,
+            detection_threshold=detection_threshold,
+        )
+        console.print(f"Settings: {settings.model_dump(mode='json')}", markup=False)
+        console.print(
+            "Sample timestamps remain relative to the original movie. Mixed-language dialogue requires review."
+        )
+        directory = generate_job(
+            media,
+            settings,
+            audio_stream,
+            parse_time(start),
+            parse_time(duration) if duration else None,
+            notify=lambda message: console.print(message, markup=False),
+        )
+        console.print(f"Job artifacts: {directory}", markup=False)
+    except KeyboardInterrupt:
+        console.print(
+            "Cancelled; existing job artifacts preserved. Phase 1 cannot resume interrupted inference."
+        )
+        raise typer.Exit(130)
+    except Exception as exc:
+        fail(exc)
+
+
+@app.command()
 def languages():
     """List backend-supported languages (project evaluation is separate)."""
     table = Table("Code", "Language", "Project evaluation")
     for code, name in supported_languages().items():
-        table.add_row(code, name, "Not evaluated")
+        table.add_row(
+            code,
+            name,
+            "Small/CPU clip run; human review pending"
+            if code == "ja"
+            else "Not evaluated",
+        )
     console.print(table)
 
 

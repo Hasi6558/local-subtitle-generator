@@ -19,3 +19,28 @@
   environments, and Python caches remain outside source control.
 - Checked upstream faster-whisper and CTranslate2 installation documentation.
   CPU is the tested path; CUDA discovery and DLL/model execution are distinct.
+
+## Phase 1
+
+- Shared media/inference/jobs/subtitles services implement generation; CLI is an
+  adapter. SRT serialization and round-trip validation use srt 3.5.3.
+- Models are prepared explicitly. Generation resolves only local cached snapshots
+  and checks tokenizer presence to prevent the backend's tokenizer download fallback.
+- Small was explicitly downloaded for a CPU smoke test. Medium remains the default
+  quality baseline, not a tested quality claim on this hardware.
+- Use full SHA-256 input fingerprints and snapshot revisions for reproducibility.
+  Language-resolution cache keys include track, range, model, backend versions,
+  settings, and policy. Effective language is resolved before inference identity.
+- Detection uses up to three original contiguous 30-second speech-starting windows,
+  accepting a top score of at least 0.7. This is heuristic; unresolved cases fail.
+  Diagnostic sample intervals stay on the movie timeline, including on failure.
+- Extraction normalizes original audio PTS by the container start and uses resampling
+  to pad leading gaps, then trims by movie-relative time. Sample extraction decodes
+  from the beginning; efficient seeking is deferred pending correctness tests.
+- Keep raw segment fields and diagnostics intact. Derived cues clip out-of-range
+  model timings with flags; empty/nonpositive cues are skipped with warnings.
+- Always create a new UUID job directory. No regeneration overwrites user edits.
+  Full decoded audio is held in memory for this baseline; bounded-memory chunking
+  and interruption/resume are Phase 2, not implied by saved partial raw results.
+- User-provided media, model weights, transcripts, and generated subtitles remain
+  ignored locally. Commit only code, dependencies, and measured review notes.
