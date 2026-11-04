@@ -731,8 +731,9 @@ function NewJob({
             </label>
           </details>
           <p className="muted">
-            Choose from a folder approved by your local server. To use another
-            folder, add it with --media-root when starting the server.
+            Choose video can select a file from any folder on this PC. Manual
+            paths must refer to a previously selected file or an approved media
+            folder.
           </p>
           {info && (
             <label>

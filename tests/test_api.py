@@ -45,9 +45,7 @@ def create_job(api):
     return response.json()
 
 
-def test_native_picker_selection_cancel_auth_and_root_restriction(
-    api, monkeypatch, tmp_path
-):
+def test_native_picker_selection_cancel_auth_and_access(api, monkeypatch, tmp_path):
     client, app, root, media = api
     monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: media)
     assert client.post("/media/pick", headers={"Authorization": ""}).status_code == 401
@@ -62,11 +60,57 @@ def test_native_picker_selection_cancel_auth_and_root_restriction(
     assert client.post("/media/pick").json() == {"path": None}
     outside = tmp_path / "outside.mp4"
     outside.write_bytes(b"video")
+    assert client.post("/media/inspect", json={"path": str(outside)}).status_code == 403
     monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: outside)
-    assert client.post("/media/pick").status_code == 403
-    # A failed selection releases the picker lock for the next request.
+    assert client.post("/media/pick").json() == {"path": str(outside.resolve())}
     monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: media)
     assert client.post("/media/pick").status_code == 200
+
+
+def test_picked_external_file_survives_restart_and_worker_dispatch(
+    api, monkeypatch, tmp_path
+):
+    client, app, root, media = api
+    outside = tmp_path / "日本語 video.wav"
+    outside.write_bytes(media.read_bytes())
+    neighbour = tmp_path / "unselected.wav"
+    neighbour.write_bytes(media.read_bytes())
+    monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: outside)
+    assert client.post("/media/pick").status_code == 200
+    assert client.post("/media/inspect", json={"path": str(outside)}).status_code == 200
+    assert (
+        client.post("/media/inspect", json={"path": str(neighbour)}).status_code == 403
+    )
+    created = client.post("/jobs", json={"path": str(outside)})
+    assert created.status_code == 201, created.text
+    job_id = created.json()["job_id"]
+    assert client.get(f"/jobs/{job_id}/media").content == outside.read_bytes()
+    assert client.get(f"/jobs/{job_id}/playback").status_code == 200
+    dispatched = []
+    monkeypatch.setattr(
+        "local_subs.api_worker.run",
+        lambda directory, manifest, *a, **k: dispatched.append(manifest["source_path"]),
+    )
+    assert work_once(root, [media.parent])
+    assert dispatched == [str(outside.resolve())]
+    restarted = create_app(
+        root, [media.parent], token="test-local-token", start_worker=False
+    )
+    with TestClient(
+        restarted,
+        base_url="http://127.0.0.1:8765",
+        headers={"Authorization": "Bearer test-local-token"},
+    ) as other:
+        assert (
+            other.post("/media/inspect", json={"path": str(outside)}).status_code == 200
+        )
+        assert other.get(f"/jobs/{job_id}/media").status_code == 200
+    # Replacing a picked path with a different file requires selecting it again.
+    replacement = tmp_path / "replacement.wav"
+    replacement.write_bytes(media.read_bytes())
+    outside.unlink()
+    replacement.rename(outside)
+    assert client.get(f"/jobs/{job_id}/media").status_code == 403
 
 
 def complete_job(api):
