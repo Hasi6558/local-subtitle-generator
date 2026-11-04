@@ -14,6 +14,8 @@ from local_subs.media import parse_time
 app = typer.Typer(no_args_is_help=True)
 models = typer.Typer(no_args_is_help=True)
 app.add_typer(models, name="models")
+jobs = typer.Typer(no_args_is_help=True)
+app.add_typer(jobs, name="jobs")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 console = Console(legacy_windows=False)
@@ -40,9 +42,16 @@ def generate(
     duration: str | None = None,
     vad: bool | None = typer.Option(None, "--vad/--no-vad"),
     detection_threshold: float | None = None,
+    chunk_seconds: int | None = None,
+    overlap_seconds: int | None = None,
+    single_pass: bool = False,
 ):
     """Generate English SRT offline, retaining the original movie timeline."""
-    from local_subs.jobs import generate as generate_job
+    from local_subs.resumable import generate as generate_job
+    from local_subs.resumable import Cancelled
+
+    if single_pass:
+        from local_subs.jobs import generate as generate_job
 
     try:
         settings = load_settings(
@@ -56,6 +65,8 @@ def generate(
             model_cache=model_cache,
             vad=vad,
             detection_threshold=detection_threshold,
+            chunk_seconds=chunk_seconds,
+            overlap_seconds=overlap_seconds,
         )
         console.print(f"Settings: {settings.model_dump(mode='json')}", markup=False)
         console.print(
@@ -70,11 +81,104 @@ def generate(
             notify=lambda message: console.print(message, markup=False),
         )
         console.print(f"Job artifacts: {directory}", markup=False)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, Cancelled):
         console.print(
-            "Cancelled; existing job artifacts preserved. Phase 1 cannot resume interrupted inference."
+            "Cancelled; completed checkpoints preserved. Resume restarts any unfinished chunk."
         )
         raise typer.Exit(130)
+    except Exception as exc:
+        fail(exc)
+
+
+@app.command()
+def resume(
+    job_id: str,
+    output_dir: Path = Path("outputs"),
+    source_language: str | None = None,
+    model: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    audio_stream: int | None = None,
+    chunk_seconds: int | None = None,
+    overlap_seconds: int | None = None,
+):
+    """Resume matching completed chunks; changed inference settings invalidate stale results."""
+    from local_subs.resumable import resume as resume_job, Cancelled
+
+    try:
+        resume_job(
+            job_id,
+            output_dir,
+            {
+                "source_language": source_language,
+                "speech_model": model,
+                "device": device,
+                "compute_type": compute_type,
+                "chunk_seconds": chunk_seconds,
+                "overlap_seconds": overlap_seconds,
+            },
+            audio_stream,
+            notify=lambda message: console.print(message, markup=False),
+        )
+    except (KeyboardInterrupt, Cancelled):
+        raise typer.Exit(130)
+    except Exception as exc:
+        fail(exc)
+
+
+@app.command()
+def cancel(job_id: str, output_dir: Path = Path("outputs")):
+    """Request cooperative cancellation of a local job."""
+    from local_subs.resumable import cancel as cancel_job
+
+    try:
+        console.print(cancel_job(job_id, output_dir))
+    except Exception as exc:
+        fail(exc)
+
+
+@jobs.command("list")
+def jobs_list(output_dir: Path = Path("outputs")):
+    from local_subs.resumable import read_manifest
+
+    table = Table()
+    table.add_column("Job ID", no_wrap=True)
+    for title in ("State", "Completed chunks", "Source"):
+        table.add_column(title)
+    for path in sorted(output_dir.glob("*/manifest.json")):
+        try:
+            data = read_manifest(path.parent)
+            chunks = data.get("chunks", [])
+            table.add_row(
+                data["job_id"],
+                data["state"],
+                f"{sum(c.get('state') == 'completed' for c in chunks)}/{len(chunks)}",
+                data.get("source_path", data.get("source", {}).get("path", "")),
+            )
+        except (OSError, ValueError, KeyError):
+            console.print(f"Skipping unreadable manifest: {path}", markup=False)
+    console.print(table)
+
+
+@jobs.command("show")
+def jobs_show(job_id: str, output_dir: Path = Path("outputs")):
+    from local_subs.resumable import job_directory, read_manifest
+
+    try:
+        console.print_json(data=read_manifest(job_directory(output_dir, job_id)))
+    except Exception as exc:
+        fail(exc)
+
+
+@jobs.command("cleanup")
+def jobs_cleanup(job_id: str, output_dir: Path = Path("outputs")):
+    """Delete prepared WAVs only; preserve checkpoints, exports and edits."""
+    from local_subs.resumable import cleanup
+
+    try:
+        console.print(
+            f"Removed {cleanup(job_id, output_dir)} bytes of prepared audio. Resume can re-extract it."
+        )
     except Exception as exc:
         fail(exc)
 

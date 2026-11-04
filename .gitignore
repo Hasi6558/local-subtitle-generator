@@ -1,4 +1,5 @@
 plan/
+test-video/
 .venv/
 __pycache__/
 *.egg-info/

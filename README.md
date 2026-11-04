@@ -1,9 +1,10 @@
 # Local subtitle generator
 
 Offline multilingual-to-English movie subtitles, built one phase at a time.
-Phase 1 provides offline English SRT generation, environment checks, audio-track
-inspection, validated settings, and explicit model preparation. Real short-clip
-inference works; human translation/timing review and a 5–10 minute test are pending.
+Phase 2 provides chunked offline English SRT generation, checkpoints and resume,
+job management, environment checks, and explicit model preparation. A 10-minute
+Japanese dialogue test passed; human translation/timing review and full-movie
+inference acceptance remain pending.
 
 Windows setup (Python 3.11, 64-bit): install FFmpeg and put its `bin` directory on
 PATH, then open PowerShell in this repository:
@@ -84,10 +85,11 @@ The language is resolved once and cached with input/model/track/sample/settings
 identity. Mixed-language films are not reliably handled. English input uses
 transcription; other languages use Whisper's direct English translation task.
 
-Each run creates a new job directory with `manifest.json`, `audio.wav`,
-`raw_segments.json`, `generated_cues.json`, and `subtitles.en.srt`. Earlier jobs
-and user edits are never overwritten. JSON/SRT writes are atomic. Empty VAD
-results produce empty SRT with a visible warning, not invented dialogue.
+Each run creates a new job directory with `manifest.json`, disk-backed prepared
+WAV, and immutable `chunks/` checkpoints. Each export gets a new `exports/` revision
+containing raw segments, generated cues, SRT, boundary review report, and manifest
+snapshot. Earlier exports and user edits are never overwritten. JSON/SRT writes
+are atomic. Inputs with no VAD speech complete with `result: empty` and an empty SRT.
 `--no-vad` disables filtering for explicit-language inference; auto detection still
 requires VAD to identify speech-containing samples. VAD can miss quiet speech.
 
@@ -99,10 +101,46 @@ correctness-first implementation decodes from the beginning even for later sampl
 Raw times/text are preserved; exported cues are bounded to the playable sample,
 with clipping flags. Milliseconds round half up.
 
-Phase 1 loads the selected audio into memory. Full-movie bounded memory, chunk
-resume, formatting improvements, and QC reports belong to later phases. Ctrl+C
-preserves partial raw results but cannot resume inference. Model scores are review
-hints. Review meaning and timing in a media player before relying on the output.
+The default pipeline reads bounded overlapping chunks from prepared PCM audio on
+disk. Defaults: 300-second ownership targets and 5 seconds of context per side;
+cuts may move up to 2 seconds toward low-energy audio. Logical ownership remains
+separate from context. Only temporally overlapping similar phrases from adjacent
+chunks are deduplicated. Raw alternatives remain available, and uncertain merges,
+conflicts, possible truncation and omissions are flagged in `boundaries.json`.
+These checks are heuristics and cannot prove completeness or exact synchronization.
+
+Ctrl+C and `cancel` preserve completed chunks; resume restarts the unfinished chunk.
+Cancellation during extraction waits for FFmpeg to finish, and model generation
+checks requests when each segment arrives. One chunked worker is allowed per
+output root. Use the same output root to serialize inference; different roots
+have independent locks. Model scores are review hints. Review meaning and timing
+in a media player before relying on the output.
+
+Job commands:
+
+```powershell
+.venv\Scripts\local-subs jobs list --output-dir outputs
+.venv\Scripts\local-subs jobs show JOB_ID --output-dir outputs
+.venv\Scripts\local-subs cancel JOB_ID --output-dir outputs
+.venv\Scripts\local-subs resume JOB_ID --output-dir outputs
+.venv\Scripts\local-subs jobs cleanup JOB_ID --output-dir outputs
+```
+
+Cleanup removes generated prepared audio only, preserving source media, checkpoints,
+exports and edits. Resume re-extracts missing/corrupt audio. Source fingerprints,
+track, sample, model snapshot, requested/resolved language, backend versions and
+inference settings protect against stale checkpoint reuse. Changes invalidate
+affected inference while preserving compatible extraction. Prior attempt manifests
+and immutable result files retain history. No automatic retry loops are used.
+Disk space is checked before extraction; allow approximately 32 KB per second of
+mono PCM plus 64 MiB working space. Corrupt/missing media, missing cached model,
+disk errors and model errors leave actionable failure records when disk permits.
+
+Use `--chunk-seconds 120 --overlap-seconds 5` to exercise more boundaries. Keep the
+Phase 1 baseline with `generate ... --single-pass` for comparison. That baseline
+loads the entire selection into memory and does not support checkpoint resume.
+Phase 1 job IDs cannot be resumed by the chunked pipeline; create a new job.
+Readability formatting, VTT, and general QC reports are Phase 3.
 
 Test the provided clip with the prepared `small` model:
 

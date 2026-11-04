@@ -44,3 +44,39 @@
   and interruption/resume are Phase 2, not implied by saved partial raw results.
 - User-provided media, model weights, transcripts, and generated subtitles remain
   ignored locally. Commit only code, dependencies, and measured review notes.
+
+## Phase 2
+
+- Keep the Phase 1 service as an explicit `--single-pass` comparison path. Default
+  CLI generation now uses the chunked service, with schema-2 job manifests.
+- Decode the selected range to PCM16 WAV on disk once, then read bounded context
+  windows. This bounds audio arrays independently of movie length, at the cost of
+  about 32 KB/s of disk audio. Extraction still decodes from the beginning.
+- Default ownership target is 300 seconds with 5 seconds of context on each side.
+  Prefer quiet 200 ms frames within 2 seconds of each cut using an RMS heuristic;
+  do not treat low energy as proof of silence. Ownership and context are separate.
+- Resolve source language once from the first speech-containing chunk; earlier
+  silent chunks can checkpoint without a model. Reuse the loaded model throughout
+  the job. Explicit source language and English transcription routing are retained.
+- Preserve checkpoints by settings/content hash, verify their file hashes, and
+  atomically replace the manifest only after a checkpoint is durable. Incomplete
+  files cannot count as completed chunks. Changed inference settings retain
+  compatible extraction; changed media/track/range invalidate extraction too.
+- Each export has a new revision and reproducibility manifest snapshot. Attempt
+  snapshots preserve prior settings before invalidation. No user edits are merged
+  or overwritten automatically.
+- Reconcile only adjacent chunks with temporal overlap plus normalized text
+  similarity. Ownership midpoint chooses candidates; conflicting or possibly
+  truncated boundary text is flagged and raw alternatives are retained. These
+  heuristics cannot guarantee no omitted dialogue; human review remains required.
+- Cooperative cancellation is checked at segment/chunk boundaries. FFmpeg
+  extraction finishes before honoring an external cancel request. Ctrl+C or a
+  process crash can restart the current chunk; no token-level resume is promised.
+- One worker lock per output root avoids concurrent chunked inference by default.
+  Different roots are independent. Stale process locks can be recovered on resume;
+  job control is local, with no background daemon, queue scheduler, or HTTP service.
+- Cleanup deletes generated prepared audio, never source media, checkpoints or
+  exported/user-edited artifacts. Resuming reconstructs missing prepared audio.
+- Keep the user's complete test-video directory ignored, including reference SRT.
+  Full-movie preparation is tested, but full-movie model inference and human
+  timing/meaning acceptance remain explicitly unverified.
