@@ -210,7 +210,7 @@ def test_repository_authority_migration_and_recovery(tmp_path, monkeypatch):
     repository.request_cancel(job_id)
     assert JobRepository(root).get(job_id)["state"] == "cancelled"
     with sqlite3.connect(repository.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_worker_failure_preserves_job(api, monkeypatch):
@@ -282,6 +282,68 @@ def test_api_cancels_active_inference_without_lost_control_flag(api, monkeypatch
     assert result["state"] == "cancelled"
     assert result["cancel_requested"] is True
     assert client.post(f"/jobs/{job_id}/retry").json()["cancel_requested"] is False
+
+
+def test_proposal_job_keeps_parent_edits(api):
+    client, app, root, media = api
+    manifest, cues = complete_job(api)
+    parent = manifest["job_id"]
+    baseline = client.get(f"/jobs/{parent}/cues").json()
+    baseline["cues"][0]["text"] = "Keep my correction."
+    assert (
+        client.put(
+            f"/jobs/{parent}/cues",
+            json={"expected_revision": 0, "cues": baseline["cues"]},
+        ).status_code
+        == 200
+    )
+    proposed = client.post(
+        "/jobs",
+        json={
+            "path": str(media),
+            "parent_job_id": parent,
+            "start_ms": 0,
+            "duration_ms": 1000,
+        },
+    )
+    assert proposed.status_code == 201
+    assert proposed.json()["parent_job_id"] == parent
+    assert (
+        client.get(f"/jobs/{parent}/cues").json()["cues"][0]["text"]
+        == "Keep my correction."
+    )
+    assert client.get(f"/jobs/{parent}/cue-revisions").json()[0]["revision"] == 1
+
+
+def test_public_bundle_does_not_expose_private_routes(api, tmp_path):
+    client, original, root, media = api
+    bundle = tmp_path / "bundle"
+    (bundle / "assets").mkdir(parents=True)
+    (bundle / "index.html").write_text("<html>Review fixture</html>")
+    (bundle / "assets" / "style.css").write_text("body { color: black }")
+    app = create_app(
+        root,
+        [media.parent],
+        token="static-test-token",
+        start_worker=False,
+        web_dir=bundle,
+    )
+    with TestClient(app, base_url="http://127.0.0.1:8765") as public:
+        assert public.get("/").status_code == 200
+        assert public.get("/assets/style.css").status_code == 200
+        assert public.get("/jobs").status_code == 401
+        response = public.get("/assets/%2e%2e/jobs.sqlite3")
+        assert response.status_code in (401, 404)
+        assert not response.content.startswith(b"SQLite format")
+
+
+def test_quality_recomputes_stale_derived_flags(api):
+    client, app, root, media = api
+    manifest, cues = complete_job(api)
+    cues[0]["flags"] = ["reading_speed"]
+    write_json(root / manifest["job_id"] / "generated_cues.json", cues)
+    report = client.get(f"/jobs/{manifest['job_id']}/qc").json()
+    assert "reading_speed" not in report["issue_counts"]
 
 
 def test_shutdown_cancels_active_keeps_queue_and_releases_lock(tmp_path, monkeypatch):

@@ -55,6 +55,7 @@ def prepare(
     duration_ms=None,
     notify=lambda _: None,
     queued=False,
+    parent_job_id=None,
 ):
     if start_ms < 0 or (duration_ms is not None and duration_ms <= 0):
         raise ValueError("Start must be nonnegative and duration positive")
@@ -71,6 +72,7 @@ def prepare(
         "job_id": directory.name,
         "state": "queued",
         "execution_mode": "queued" if queued else "foreground",
+        "parent_job_id": parent_job_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_path": str(path),
         "audio_stream": track["index"],

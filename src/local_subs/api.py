@@ -3,6 +3,7 @@
 import copy
 import hmac
 import secrets
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -11,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.staticfiles import StaticFiles
 
 from local_subs.api_worker import allowed_media
 from local_subs.config import Settings, languages
@@ -18,7 +20,7 @@ from local_subs.exports import write_quality_artifacts
 from local_subs.jobs import atomic_text, write_json
 from local_subs.media import inspect_media
 from local_subs.policy import FormattingPolicy
-from local_subs.quality import assess, read_cues
+from local_subs.quality import assess, read_cues, READABILITY_FLAGS
 from local_subs.repository import Conflict, JobRepository
 from local_subs.resumable import prepare
 from local_subs.service import WorkerManager
@@ -31,6 +33,7 @@ class CreateJob(BaseModel):
     audio_stream: int | None = Field(default=None, ge=0)
     start_ms: int = Field(default=0, ge=0, strict=True)
     duration_ms: int | None = Field(default=None, gt=0, strict=True)
+    parent_job_id: str | None = Field(default=None, pattern="^[0-9a-f]{32}$")
 
 
 class InspectRequest(BaseModel):
@@ -50,8 +53,19 @@ class ExportRequest(BaseModel):
     formatting: FormattingPolicy | None = None
 
 
+class PreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    force_transcode: bool = False
+
+
 def create_app(
-    output_root, media_roots, model_cache=None, token=None, port=8765, start_worker=True
+    output_root,
+    media_roots,
+    model_cache=None,
+    token=None,
+    port=8765,
+    start_worker=True,
+    web_dir=None,
 ):
     root = Path(output_root).resolve()
     roots = [Path(path).resolve() for path in media_roots]
@@ -73,15 +87,22 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app):
+        from local_subs.previews import PreviewManager
+
         manager = WorkerManager(root, roots) if start_worker else None
         app.state.manager = manager
         if manager:
             await manager.start()
         try:
+            app.state.previews = PreviewManager(root, roots, repository)
             yield
         finally:
-            if manager:
-                await manager.stop()
+            try:
+                if manager:
+                    await manager.stop()
+            finally:
+                if hasattr(app.state, "previews"):
+                    await asyncio.to_thread(app.state.previews.stop)
 
     app = FastAPI(
         title="Local Subtitles API",
@@ -98,7 +119,10 @@ def create_app(
         origin = request.headers.get("origin")
         if origin is not None and origin not in origins:
             return JSONResponse({"detail": "Origin is not approved"}, status_code=403)
-        if request.url.path != "/health":
+        public = request.url.path in ("/", "/health") or request.url.path.startswith(
+            "/assets/"
+        )
+        if not public:
             authorization = request.headers.get("authorization", "")
             supplied = (
                 authorization[7:]
@@ -203,9 +227,43 @@ def create_app(
     def inspect(request: InspectRequest):
         return inspect_media(allowed_media(request.path, roots))
 
+    @app.get("/models")
+    def models():
+        from faster_whisper.utils import download_model
+
+        entries = []
+        for name in (
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large-v1",
+            "large-v2",
+            "large-v3",
+        ):
+            try:
+                path = Path(
+                    download_model(name, cache_dir=str(cache), local_files_only=True)
+                )
+                ready = all(
+                    (path / item).is_file()
+                    for item in ("model.bin", "tokenizer.json", "config.json")
+                )
+            except Exception:
+                ready = False
+            entries.append({"id": name, "prepared": ready})
+        return {"models": entries, "model_cache": str(cache)}
+
     @app.post("/jobs", status_code=201)
     def create(request: CreateJob):
         media = allowed_media(request.path, roots)
+        if request.parent_job_id:
+            parent = job(request.parent_job_id)
+            original = parent.get("source_path") or parent.get("source", {}).get("path")
+            if Path(original).resolve() != media:
+                raise ValueError(
+                    "A proposed replacement must use the same source media"
+                )
         settings = Settings.model_validate(
             request.settings.model_dump() | {"output_dir": root, "model_cache": cache}
         )
@@ -216,6 +274,7 @@ def create_app(
             request.start_ms,
             request.duration_ms,
             queued=True,
+            parent_job_id=request.parent_job_id,
         )
         return repository.get(directory.name)
 
@@ -274,6 +333,9 @@ def create_app(
         cues = copy.deepcopy(request.cues)
         old = {cue["id"]: cue for cue in previous["cues"]}
         for cue in cues:
+            cue["flags"] = [
+                flag for flag in cue.get("flags", []) if flag not in READABILITY_FLAGS
+            ]
             source = old.get(cue["id"], {})
             changed = any(
                 cue.get(key) != source.get(key)
@@ -345,5 +407,89 @@ def create_app(
         manifest = job(job_id)
         source = manifest.get("source_path") or manifest.get("source", {}).get("path")
         return FileResponse(allowed_media(Path(source), roots))
+
+    @app.get("/jobs/{job_id}/playback")
+    def playback(job_id: str):
+        manifest = job(job_id)
+        source = manifest.get("source_path") or manifest.get("source", {}).get("path")
+        info = inspect_media(allowed_media(Path(source), roots))
+        tracks = [
+            stream for stream in info["streams"] if stream["codec_type"] == "audio"
+        ]
+        default = next(
+            (
+                stream
+                for stream in tracks
+                if stream.get("disposition", {}).get("default")
+            ),
+            tracks[0] if tracks else None,
+        )
+        return {
+            "selected_audio_stream": manifest["audio_stream"],
+            "default_audio_stream": default["index"] if default else None,
+            "requires_selected_track_preview": default is not None
+            and default["index"] != manifest["audio_stream"],
+        }
+
+    @app.post("/jobs/{job_id}/preview", status_code=202)
+    def create_preview(job_id: str, request: PreviewRequest):
+        return app.state.previews.request(job(job_id), request.force_transcode)
+
+    @app.get("/jobs/{job_id}/preview")
+    def preview_status(job_id: str, key: str | None = None):
+        job(job_id)
+        return repository.preview(job_id, key)
+
+    @app.get("/jobs/{job_id}/preview/media")
+    def preview_media(job_id: str, key: str):
+        job(job_id)
+        data = repository.preview(job_id, key)
+        if data["state"] != "completed":
+            raise Conflict("Preview is not ready")
+        return FileResponse(
+            safe_output(data["path"], root / job_id / "previews"),
+            media_type="video/mp4",
+        )
+
+    @app.get("/jobs/{job_id}/qc")
+    def cue_quality(job_id: str, revision: int | None = None):
+        manifest = job(job_id)
+        selected = cue_revision(job_id, revision)
+        current = copy.deepcopy(selected["cues"])
+        for cue in current:
+            cue["flags"] = [
+                flag for flag in cue.get("flags", []) if flag not in READABILITY_FLAGS
+            ]
+        return assess(
+            current,
+            Settings.model_validate(manifest["settings"]).formatting,
+            manifest["sample_start_ms"] + manifest["sample_duration_ms"],
+        )
+
+    @app.get("/jobs/{job_id}/cue-revisions")
+    def cue_revisions(job_id: str):
+        cue_revision(job_id)
+        with repository.connect() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT revision,created_at FROM cue_revisions WHERE job_id=? ORDER BY revision DESC",
+                    (job_id,),
+                )
+            ]
+
+    bundle = (
+        Path(web_dir)
+        if web_dir is not None
+        else Path(__file__).resolve().parents[2] / "web" / "dist"
+    )
+    if (bundle / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=bundle / "assets"), name="assets")
+
+    @app.get("/")
+    def interface():
+        if not (bundle / "index.html").is_file():
+            raise HTTPException(503, "The local review interface has not been built")
+        return FileResponse(bundle / "index.html", media_type="text/html")
 
     return app

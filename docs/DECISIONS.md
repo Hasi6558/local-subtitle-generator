@@ -135,3 +135,33 @@
   the test-owned worker after a durable checkpoint, then verify recovery, byte
   ranges, edit persistence and server restart. CPU success does not verify GPU or
   full-movie timing/meaning; the pre-UI real-movie gate remains open.
+
+## Phase 5
+
+- Complete the supplied 7378.389-second movie's generate/resume/validate/export
+  technical gate before building UI screens. It produced 659 cues across 25 chunks;
+  all checkpoint mtimes survived resume, and SRT/VTT structure passed. Human meaning
+  and viewed synchronization remain unverified; review issues were not discarded.
+- Use React/TypeScript/Vite static assets served from the same authenticated API
+  origin. Only index/assets are public. Session keys remain out of browser storage
+  and URLs. CLI/API operation does not depend on Node or a built interface.
+- Keep autosave optimistic, serialized and version-aware; queue edits arriving
+  during in-flight saves. Preserve conflicting drafts and offer explicit reload or
+  download. Browser recovery storage is best-effort and cannot block server saves.
+- Split at explicit word/time boundaries, merge without losing text, and retain
+  undo/revision history. Reprocessing creates a separate parent-linked proposal;
+  applying proposed text is explicit and retains the selected original cue timing.
+- Store preview metadata in schema 3, independently of inference. Keep source and
+  selected-track fingerprint keys, atomic output replacement and file hashes.
+  Remux H.264/AAC when possible; otherwise encode compatible streams. Normalize
+  timestamps relative to source presentation start and preserve delayed audio.
+- Run one owned preview encoder asynchronously in a thread supervising FFmpeg;
+  terminate it on shutdown, mark interrupted previews retryable, and leave source
+  media unchanged. Require a selected-track preview when browser default audio
+  differs. Actual original and preview seek paths are browser-tested.
+- Use Windows SelectorEventLoop for loopback HTTP; all child work uses native
+  Popen/thread helpers. This avoids Proactor transport-reset traceback noise when
+  browser range requests are cancelled while seeking/changing sources.
+- Test synthetic browser workflows separately from actual cached-model browser
+  inference. Do not equate successful UI operations or structural export with a
+  source-language human translation/timing verdict.

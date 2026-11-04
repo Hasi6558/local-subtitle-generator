@@ -1,5 +1,57 @@
 # Progress
 
+## Phase 5: review UI implemented; technical gates passed; human quality review open
+
+Implemented: React/TypeScript/Vite review UI served by the local API; local session
+connection; new jobs/track/language/model/sample selection; queue progress and
+cancel/resume; video/cue seeking and active highlighting; text/timing autosave with
+optimistic conflicts, best-effort draft recovery/download and undo; explicit
+split/merge; search/QC filters/reasons; generated/edited revision exports; cached
+remux/transcode previews; separate range proposals with explicit text acceptance.
+CLI remains usable without frontend dependencies or a browser. No upload flow.
+
+Verification on 4 November 2026:
+- Full 7378.389-second Japanese movie completed: 25 chunks, 659 cues. Subsequent
+  resume preserved all checkpoint mtimes, and SRT/VTT validation/export passed.
+  Local summary: outputs/phase5-movie-gate.json; export under
+  outputs/phase2-movie/8ae5ffa300624bc49e7429e07d34bbf2/exports/7675215416894d9c8d25e2fc004945bc.
+- Recorded cumulative service time 941.396 seconds includes attempts and resume;
+  it is not a clean wall-clock benchmark. The initial live schema upgrade stopped
+  the older worker; six saved chunks were reused after restarting compatible code.
+  An unfinished/unrecorded tail can be absent from cumulative timing. Keep schema
+  stable during inference. Mid-run observed process peak: 1,069,432,832 bytes;
+  this sample is not a guarantee of final/full-movie peak memory.
+- QC preserved issues including 195 long durations, 49 reading-speed flags,
+  boundary conflicts and 11 VAD speech regions without output. Structure/seek
+  arithmetic does not establish semantic accuracy or viewed synchronization.
+- Python suite: 50 passed, 3 optional inference tests skipped. Covers previous CLI/
+  API behavior plus preview codecs, offsets, source preservation, cache hashes,
+  selected-track protection, static asset isolation and preserved parent edits.
+- Web build/type check passed; 8 editor/unit tests passed, including in-flight
+  saves, conflict recovery, unavailable browser storage and word/time preservation.
+- Four browser workflows passed on Windows Chrome: edit/autosave/reload,
+  split/merge/undo, original/preview seeking and keyboard controls, edited SRT
+  download, conflict draft recovery, unsupported codec fallback, queue cancellation
+  and explicit proposal acceptance. Desktop/mobile screenshots visually inspected;
+  mobile has no horizontal overflow. Fixtures are synthetic and never run models.
+- Separate real browser/model flow passed twice with the user's 36-second clip
+  and cached small/CPU/int8 model: UI-created job produced 13 cues, saved edit
+  survived reload, compatible preview sought correctly, edited SRT downloaded.
+  Final run: 1 passed / 4 fixture tests intentionally skipped, 28.5 seconds total.
+  Local log: outputs/phase5-live-browser-final.log; image: outputs/phase5-real-review.png.
+- Ruff, pip check, build and whitespace checks passed. Node/npm packages locked;
+  compiled assets, media, weights, screenshots and test libraries remain ignored.
+
+Human meaning and viewed synchronization remain unverified, along with medium/GPU
+and a second source language. Proposal acceptance changes text only, not original
+timing; automatic selective re-alignment/reconciliation remains Phase 7. Browser
+coverage is Windows Chrome; no universal codec/playback claims. No quality-release
+readiness is inferred from structural/browser success.
+
+Next: user review and confirmation before Phase 6 optional contextual local
+translation. Evaluate hardware/model/language-pair fit before adding a text model;
+keep direct Whisper translation as the baseline. No Phase 6 work started.
+
 ## Phase 4: local API and persistent worker implemented and verified on CPU
 
 Implemented: loopback FastAPI/Uvicorn server; shared authoritative SQLite job
