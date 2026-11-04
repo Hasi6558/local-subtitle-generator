@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 test.skip(
   !process.env.LOCAL_SUBS_UI_LIVE,
   "Enable LOCAL_SUBS_UI_LIVE for real cached-model browser acceptance",
@@ -75,6 +75,103 @@ test("real local video: create, infer, review, edit, reload, preview, seek and e
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({
     path: "../outputs/phase5-real-review.png",
+    fullPage: true,
+  });
+});
+
+test("real contextual worker: paired generation, source review and independent edits", async ({
+  page,
+  request,
+}) => {
+  test.skip(
+    !process.env.LOCAL_SUBS_UI_CONTEXTUAL,
+    "Enable LOCAL_SUBS_UI_CONTEXTUAL for the slower local text-model gate",
+  );
+  test.setTimeout(300000);
+  const headers = { Authorization: "Bearer ui-test-key" };
+  const jobs = await (await request.get("/jobs", { headers })).json();
+  const direct = jobs.find(
+    (job: { state: string; settings: { pipeline?: string } }) =>
+      job.state === "completed" && job.settings.pipeline === "direct",
+  );
+  expect(direct).toBeTruthy();
+  await page.goto(`/#/review/${direct.job_id}`);
+  await page.getByLabel("Local session key").fill("ui-test-key");
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByLabel("English text")).toHaveValue(
+    "Manual browser acceptance edit.",
+  );
+  await page
+    .getByRole("button", { name: "Contextual local · Create test…" })
+    .click();
+  await expect(
+    page.getByRole("radio", { name: "Contextual local", exact: true }),
+  ).toBeChecked();
+  await page
+    .getByRole("button", { name: "Inspect video", exact: true })
+    .click();
+  const creating = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/jobs") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("button", { name: "Create English subtitles →" })
+    .click();
+  const contextual = await (await creating).json();
+  const review = page.locator(`a[href="#/review/${contextual.job_id}"]`);
+  await expect(review).toBeVisible({ timeout: 240000 });
+  await review.click();
+  await expect(page.locator(".cue-editor .source-text")).toContainText("ja");
+  const manifest = await (
+    await request.get(`/jobs/${contextual.job_id}`, { headers })
+  ).json();
+  const source = await (
+    await request.get(`/jobs/${contextual.job_id}/source-cues`, { headers })
+  ).json();
+  expect(source.translation.incomplete_ids).toEqual([]);
+  expect(manifest.translation.state).toBe("completed");
+  const comparison = await (
+    await request.get(`/jobs/${contextual.job_id}/compare/${direct.job_id}`, {
+      headers,
+    })
+  ).json();
+  expect(comparison.human_meaning).toBe("unverified");
+  await page
+    .getByLabel("English text")
+    .fill("Independent contextual acceptance edit.");
+  await expect(page.locator(".save-state")).toContainText("Saved");
+  await page
+    .getByRole("button", { name: "Whisper direct", exact: true })
+    .click();
+  await expect(page.getByLabel("English text")).toHaveValue(
+    "Manual browser acceptance edit.",
+  );
+  await page
+    .getByRole("button", { name: "Contextual local", exact: true })
+    .click();
+  await expect(page.getByLabel("English text")).toHaveValue(
+    "Independent contextual acceptance edit.",
+  );
+  await page.getByRole("button", { name: "Prepare SRT & VTT" }).click();
+  await expect(
+    page.getByRole("link", { name: "Download SRT", exact: true }),
+  ).toBeVisible();
+  await writeFile(
+    "../outputs/phase6-live-acceptance.json",
+    JSON.stringify(
+      {
+        direct,
+        contextual: manifest,
+        comparison,
+        source_count: source.cues.length,
+      },
+      null,
+      2,
+    ),
+  );
+  await page.screenshot({
+    path: "../outputs/phase6-live-comparison.png",
     fullPage: true,
   });
 });

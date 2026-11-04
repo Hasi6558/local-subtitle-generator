@@ -34,6 +34,7 @@ class CreateJob(BaseModel):
     start_ms: int = Field(default=0, ge=0, strict=True)
     duration_ms: int | None = Field(default=None, gt=0, strict=True)
     parent_job_id: str | None = Field(default=None, pattern="^[0-9a-f]{32}$")
+    comparison_job_id: str | None = Field(default=None, pattern="^[0-9a-f]{32}$")
 
 
 class InspectRequest(BaseModel):
@@ -267,6 +268,19 @@ def create_app(
         settings = Settings.model_validate(
             request.settings.model_dump() | {"output_dir": root, "model_cache": cache}
         )
+        if request.comparison_job_id:
+            from local_subs.comparison import compatible
+
+            other = job(request.comparison_job_id)
+            compatible(
+                other,
+                {
+                    "source_path": str(media),
+                    "audio_stream": request.audio_stream,
+                    "sample_start_ms": request.start_ms,
+                    "sample_duration_ms": request.duration_ms,
+                },
+            )
         directory, manifest = prepare(
             media,
             settings,
@@ -275,8 +289,36 @@ def create_app(
             request.duration_ms,
             queued=True,
             parent_job_id=request.parent_job_id,
+            comparison_job_id=request.comparison_job_id,
         )
         return repository.get(directory.name)
+
+    @app.get("/translation-models")
+    def translation_models():
+        from local_subs.text_models import MODELS, prepared, RUNTIME_TAG
+        from local_subs.translation import SUPPORTED
+
+        return {
+            "models": [
+                {"id": name, "prepared": prepared(cache, name), **spec}
+                for name, spec in MODELS.items()
+            ],
+            "model_cache": str(cache),
+            "source_languages": SUPPORTED,
+            "runtime": f"llama.cpp {RUNTIME_TAG}",
+            "human_meaning": "unverified",
+        }
+
+    @app.get("/jobs/{job_id}/compare/{other_id}")
+    def compare_jobs(job_id: str, other_id: str):
+        from local_subs.comparison import compare
+
+        return compare(
+            job(job_id),
+            job(other_id),
+            cue_revision(job_id)["cues"],
+            cue_revision(other_id)["cues"],
+        )
 
     @app.get("/jobs")
     def list_jobs():
@@ -319,6 +361,36 @@ def create_app(
     @app.get("/jobs/{job_id}/cues")
     def get_cues(job_id: str, revision: int | None = None):
         return cue_revision(job_id, revision)
+
+    @app.get("/jobs/{job_id}/source-cues")
+    def source_cues(job_id: str):
+        import json
+
+        manifest = job(job_id)
+        path = manifest.get("artifacts", {}).get("source_cues.json")
+        if not path:
+            raise HTTPException(404, "This job has no source transcript")
+        report_path = root / job_id / "translation_report.json"
+        report = (
+            json.loads(
+                safe_output(report_path, root / job_id).read_text(encoding="utf-8")
+            )
+            if report_path.is_file()
+            else None
+        )
+        return {
+            "cues": read_cues(safe_output(path, root / job_id)),
+            "translation": report,
+        }
+
+    @app.get("/jobs/{job_id}/source-subtitles")
+    def source_subtitles(job_id: str):
+        path = job(job_id).get("artifacts", {}).get("subtitles.source.srt")
+        if not path:
+            raise HTTPException(404, "This job has no source subtitles")
+        return FileResponse(
+            safe_output(path, root / job_id), filename="subtitles.source.srt"
+        )
 
     @app.put("/jobs/{job_id}/cues")
     def edit(job_id: str, request: EditRequest):

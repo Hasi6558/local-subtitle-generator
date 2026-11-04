@@ -1,5 +1,31 @@
 # Decisions
 
+## Phase 6
+
+- Keep `pipeline=direct` as the default. Add explicit contextual source-ASR →
+  local text translation, with no silent direct/hosted fallback. Treat supported
+  speech languages, configured text pairs and future alignment separately.
+- Select portable llama.cpp b12099 CPU runtime for this Windows/Ryzen/16 GB PC;
+  avoid requiring a system Ollama service. Pin official Qwen3-1.7B Q8_0 and
+  Qwen3-4B Q4_K_M for comparison. Keep 4B as a contextual test preset, not a
+  quality recommendation; model outputs and CPU measurements justify keeping
+  contextual mode optional. Exact provenance/evidence lives in MODELS.md.
+- Keep source timings/IDs outside the model. Bound neighbouring context and
+  target groups, constrain JSON and independently validate exact target ID sets.
+  Version the faithful prompt and retain raw response diagnostics/checkpoints.
+- Separate ASR identity from text settings/glossary/prompt so translation changes
+  reuse verified source audio/chunks. Preserve existing direct checkpoint keys.
+  Explicitly unload native speech weights before loading text weights; supervise
+  the native server to clean up after normal shutdown or worker disappearance.
+- Store comparison links in job metadata without a database migration. Each mode
+  is a separate job with immutable exports and independent cue revisions. Keep
+  comparison links separate from selected-range replacement proposals. Switching
+  review pipelines never implicitly overwrites saved corrections.
+- Preserve source artifacts before translation and fail incomplete batches after
+  bounded retries. Expose source/incomplete IDs for inspection. Glossary mismatch
+  and noisy Japanese katakana name/term flags are review hints, not name detection
+  or a semantic completeness verdict. Human evaluation is still required.
+
 - Implement and merge Phase 0 separately, then wait for the user's next-phase
   confirmation. No Phase 1 inference, UI, API, or subtitle dependency yet.
 - Python 3.11.9 on Windows is the initial verified environment. Freeze resolved

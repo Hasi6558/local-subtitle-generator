@@ -60,7 +60,9 @@ subprocess.run(
 app = create_app(root, [root], token="ui-test-key", port=8767, start_worker=False)
 # Synthetic model availability is test-only; the fixture never claims/executes jobs.
 app.router.routes[:] = [
-    route for route in app.router.routes if getattr(route, "path", None) != "/models"
+    route
+    for route in app.router.routes
+    if getattr(route, "path", None) not in ("/models", "/translation-models")
 ]
 
 
@@ -71,6 +73,18 @@ def models():
             {"id": "small", "prepared": True},
             {"id": "medium", "prepared": False},
         ],
+        "model_cache": str(PROJECT / "models"),
+    }
+
+
+@app.get("/translation-models")
+def text_models():
+    return {
+        "models": [
+            {"id": "qwen3-4b", "prepared": True},
+            {"id": "qwen3-1.7b", "prepared": False},
+        ],
+        "source_languages": ["en", "ja", "ko", "zh", "fr", "de", "es", "hi"],
         "model_cache": str(PROJECT / "models"),
     }
 
@@ -107,6 +121,13 @@ def finish(identifier, text=None):
             "edit_version": 0,
         },
     ]
+    if manifest["settings"].get("pipeline") == "contextual":
+        for cue in cues:
+            cue.update(
+                source_text="コーヒーをください。",
+                source_language="ja",
+                origin="translation",
+            )
     write_json(directory / "generated_cues.json", cues)
     manifest.update(
         state="completed",

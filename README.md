@@ -1,11 +1,47 @@
 # Local subtitle generator
 
 Offline multilingual-to-English movie subtitles, built one phase at a time.
-Phase 5 adds local browser review: playback, cue editing, autosave/conflict
-recovery, split/merge/undo, QC filters and revision exports. The CLI, local API,
+Phase 6 adds optional contextual local translation with a pipeline toggle and
+separate comparison results. Browser review includes playback, cue editing,
+autosave/conflict recovery, split/merge/undo, QC filters and revision exports. The CLI, local API,
 durable queue and offline inference remain available. A full-movie CLI
 generate/resume/validate/export check passed; meaning and viewed synchronization
 still need human review.
+
+Whisper direct remains the default. In **New subtitles → Translation pipeline**,
+select **Whisper direct** or **Contextual local**. Contextual mode transcribes the
+source language and translates it with a local Qwen model, keeping the source
+text for review. Prepare its portable runtime/weights explicitly once (no Ollama
+installation needed):
+
+```powershell
+.venv\Scripts\local-subs text-models prepare qwen3-4b --model-cache models
+# Smaller candidate, optional:
+.venv\Scripts\local-subs text-models prepare qwen3-1.7b --model-cache models
+# Verify cached weights without network:
+.venv\Scripts\local-subs text-models prepare qwen3-4b --model-cache models --local-files-only
+.venv\Scripts\local-subs generate "D:\Movies\clip.mp4" --source-language ja --model small --model-cache models --pipeline contextual --text-model qwen3-4b
+```
+
+Use the same `--model-cache models` when starting `local-subs serve`. The UI shows
+prepared text models and accepts a JSON glossary such as `{"田中":"Tanaka"}`;
+the CLI accepts `--glossary glossary.json`. On a completed review screen, use
+**Test translation pipelines** to create the other mode on the same media/track/
+range. Once both exist, the two buttons switch between their independently saved
+results. The comparison panel shows text overlapping the selected cue; boundaries
+may differ. Save valid edits before switching. No replacement is applied implicitly.
+
+`local-subs compare FIRST_JOB SECOND_JOB --output-dir outputs` reports aligned
+text, stage/runtime and QC metadata; it gives no automatic semantic quality score.
+The CLI compares generated baselines; the review UI compares the latest saved edits.
+CLI `resume JOB --text-model qwen3-1.7b --glossary glossary.json` can rerun only
+affected translation batches while reusing source ASR. Previous exports and edits
+remain; use separate jobs for interactive comparisons. Failed contextual jobs
+retain source transcripts and incomplete target reports, with no direct fallback.
+
+Contextual mode is experimental and substantially slower on this CPU. Both tested
+text models produced questionable wording. Measured timings, exact model pins,
+configured/evaluated pairs and limitations are in [docs/MODELS.md](docs/MODELS.md).
 
 Windows setup (Python 3.11, 64-bit): install FFmpeg and put its `bin` directory on
 PATH, then open PowerShell in this repository:

@@ -129,6 +129,68 @@ def test_cancel_resume_and_invalidation(setup):
     assert checkpoint.exists()
 
 
+def test_contextual_source_preserved_and_text_changes_reuse_asr(setup, monkeypatch):
+    media, settings, model, loader = setup
+    tasks = []
+    original = model.transcribe
+
+    def transcribe(audio, **kwargs):
+        tasks.append(kwargs["task"])
+        return original(audio, **kwargs)
+
+    monkeypatch.setattr(model, "transcribe", transcribe)
+
+    def translate(cues, language, *args):
+        return [
+            c | {"source_text": c["text"], "text": "Translated English"} for c in cues
+        ], {"state": "completed"}
+
+    monkeypatch.setattr("local_subs.translation.translate_cues", translate)
+    directory = generate(
+        media,
+        settings.model_copy(update={"pipeline": "contextual"}),
+        model_loader=loader,
+    )
+    manifest = read_manifest(directory)
+    source = Path(manifest["artifacts"]["subtitles.source.srt"])
+    assert source.is_file() and tasks == ["transcribe"] * 3
+    mtimes = {c["path"]: Path(c["path"]).stat().st_mtime_ns for c in manifest["chunks"]}
+    resume(
+        directory.name,
+        settings.output_dir,
+        {"text_model": "qwen3-1.7b", "glossary": {"x": "y"}},
+        model_loader=loader,
+    )
+    assert model.calls == 3 and all(
+        Path(p).stat().st_mtime_ns == t for p, t in mtimes.items()
+    )
+    assert source.exists()
+    resume(
+        directory.name, settings.output_dir, {"pipeline": "direct"}, model_loader=loader
+    )
+    assert model.calls == 6 and tasks[3:] == ["translate"] * 3
+
+
+def test_translation_failure_leaves_source_without_english_fallback(setup, monkeypatch):
+    media, settings, model, loader = setup
+
+    def unavailable(*args):
+        raise ValueError("Text model unavailable")
+
+    monkeypatch.setattr("local_subs.translation.translate_cues", unavailable)
+    with pytest.raises(ValueError, match="unavailable"):
+        generate(
+            media,
+            settings.model_copy(update={"pipeline": "contextual"}),
+            model_loader=loader,
+        )
+    directory = next(settings.output_dir.glob("*/manifest.json")).parent
+    manifest = read_manifest(directory)
+    assert manifest["state"] == "failed" and manifest["failure_stage"] == "translation"
+    assert Path(manifest["artifacts"]["subtitles.source.srt"]).exists()
+    assert "subtitles.en.srt" not in manifest["artifacts"]
+
+
 def test_partial_checkpoint_cleanup_and_cancel(setup):
     media, settings, model, loader = setup
     directory = generate(media, settings, model_loader=loader)

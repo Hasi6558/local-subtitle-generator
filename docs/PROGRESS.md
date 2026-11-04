@@ -1,5 +1,55 @@
 # Progress
 
+## Phase 6: optional contextual translation implemented; human quality gate open
+
+User requested direct Whisper translation remain available with a UI toggle for
+testing. Added pinned portable llama.cpp
+b12099 and official Qwen3-1.7B Q8_0 / Qwen3-4B Q4_K_M preparation (explicit
+downloads, offline inference), source ASR, strict target-ID contextual batches,
+translation checkpoints/glossary, sequential native unload, separate paired jobs
+and UI comparison. Direct remains the default. No Ollama installation required.
+Hardware: Ryzen 7 5700U, 16 GB RAM, integrated AMD graphics; CPU runtime selected.
+Both official weights downloaded and checksummed. Exact identities, configured
+pairs, noisy name/term flag limitations and measured evidence are in MODELS.md.
+
+Verification on 4 November 2026:
+- Python suite: 69 passed, 3 opt-in inference tests skipped. New coverage includes
+  strict IDs/types, embedded instruction-like dialogue as data, context budgets,
+  bounded retries, failed/partial checkpoints, glossary/model/source invalidation,
+  unchanged ASR checkpoints, separate comparison metadata/edits, cancellable text
+  requests and real subprocess cleanup on stop/pipe closure/parent disappearance.
+- Ruff and pip checks passed; web build/type check and 9 unit tests passed. The
+  final targeted English-skip/quality regression run passed all 26 tests.
+- Five synthetic browser workflows passed (two real-inference tests deliberately
+  skipped there), including both toggle options, unprepared-model gating, paired
+  settings/glossary, source review and independent edits. Two separate real-video
+  browser tests passed with cached Small speech and Qwen3-4B through the production
+  queue worker: generate, source review, edits/reload, preview/seek, toggle and
+  edited export. Desktop screenshots inspected; no human listening verdict.
+- Same 36.177-second Japanese clip: direct produced 13 cues; contextual source
+  produced 12, and both text candidates returned all IDs in three batches with no
+  validation retries. Switching text models preserved all ASR checkpoint mtimes.
+  Initial text-stage measurements: 1.7B 73.387 s / 2,534,510,592 native RSS bytes;
+  4B 143.923 s / 5,113,933,824 native RSS bytes. Background activity uncontrolled.
+- Clean real-browser paired run: direct about 15.3 s, contextual 4B 85.428 s total,
+  including 11.533 s source inference and 71.551 s translation. Text native peak
+  5,146,611,712 bytes. Separate direct benchmark: 16.610 s / 776,192,000 process RSS
+  bytes. Memory scopes differ; no whole-app peak or full-movie extrapolation.
+- Local evidence: outputs/phase6-evaluation/evaluation.json,
+  outputs/phase6-live-acceptance.json, outputs/phase6-cli-comparison.json,
+  outputs/phase6-baseline/benchmark-*/benchmark.json. Supplied media/transcripts,
+  weights, native runtime and screenshots remain ignored by Git.
+- Sandbox blocked localhost on the first text attempt and later asyncio's local
+  test socketpair; approved runs outside it passed. A temporary-directory access
+  failure was isolated using a fresh workspace test folder. These were environment
+  limitations; source/checkpoint recovery worked without direct-mode fallback.
+
+Both text models contain questionable wording, including interpretations affected
+by source recognition errors. No model has won human semantic/name/omission/timing
+review. Other configured pairs and long-video contextual generation remain
+unevaluated. Keep this mode experimental and direct as default. Next: user review
+and confirmation before Phase 7 timing refinement/selective recovery.
+
 ## Phase 5: review UI implemented; technical gates passed; human quality review open
 
 Implemented: React/TypeScript/Vite review UI served by the local API; local session

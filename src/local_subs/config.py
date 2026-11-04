@@ -32,9 +32,43 @@ class Settings(BaseModel):
     chunk_seconds: int = Field(default=300, ge=5, le=900)
     overlap_seconds: int = Field(default=5, ge=0, le=30)
     formatting: FormattingPolicy = Field(default_factory=FormattingPolicy)
+    pipeline: Literal["direct", "contextual"] = "direct"
+    text_model: Literal["qwen3-1.7b", "qwen3-4b"] = "qwen3-4b"
+    translation_batch_size: int = Field(default=4, ge=1, le=12)
+    translation_context: int = Field(default=2, ge=0, le=8)
+    translation_context_tokens: int = Field(default=4096, ge=2048, le=8192)
+    translation_max_tokens: int = Field(default=768, ge=128, le=2048)
+    translation_retries: int = Field(default=1, ge=0, le=2)
+    glossary: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("glossary")
+    @classmethod
+    def bounded_glossary(cls, value):
+        if len(value) > 100 or any(
+            not key.strip() or not text.strip() or len(key) > 120 or len(text) > 120
+            for key, text in value.items()
+        ):
+            raise ValueError(
+                "Glossary needs at most 100 nonempty source/English entries, each at most 120 characters"
+            )
+        return value
 
     @model_validator(mode="after")
     def model_language(self):
+        if self.pipeline == "contextual" and self.source_language not in (
+            "auto",
+            "en",
+            "ja",
+            "ko",
+            "zh",
+            "fr",
+            "de",
+            "es",
+            "hi",
+        ):
+            raise ValueError(
+                "Contextual source pair is not configured; choose direct translation for this language"
+            )
         if self.overlap_seconds * 2 >= self.chunk_seconds:
             raise ValueError("Overlap must be less than half the chunk duration")
         if self.source_language == "yue" and self.speech_model != "large-v3":

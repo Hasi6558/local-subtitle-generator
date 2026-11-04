@@ -84,6 +84,15 @@ export function mergeCue(cues: Cue[], index: number): Cue[] {
     {
       ...left,
       text: `${left.text.trim()} ${right.text.trim()}`,
+      source_text:
+        left.source_text || right.source_text
+          ? !!left.source_segment_ids?.length &&
+            left.source_text === right.source_text &&
+            JSON.stringify(left.source_segment_ids) ===
+              JSON.stringify(right.source_segment_ids)
+            ? left.source_text
+            : [left.source_text, right.source_text].filter(Boolean).join("\n")
+          : undefined,
       start_ms: Math.min(left.start_ms, right.start_ms),
       end_ms: Math.max(left.end_ms, right.end_ms),
       source_segment_ids: [

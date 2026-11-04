@@ -51,4 +51,21 @@ describe("manual subtitle operations", () => {
     expect(validateDraft([{ ...cue, end_ms: 900 }])).toContain("end");
     expect(wordBoundary("singleword")).toBe(-1);
   });
+  it("retains source text across manual splits and merges without inventing word alignment", () => {
+    const source = { ...cue, source_text: "元の会話", source_language: "ja" };
+    const split = splitCue([source], 0, 5, 3000);
+    expect(split[1].source_text).toBe(source.source_text);
+    expect(mergeCue(split, 0)[0].source_text).toBe(source.source_text);
+    const next = {
+      ...source,
+      id: "two",
+      source_text: "次の会話",
+      source_segment_ids: ["seg2"],
+      start_ms: 6000,
+      end_ms: 8000,
+    };
+    expect(mergeCue([source, next], 0)[0].source_text).toBe(
+      "元の会話\n次の会話",
+    );
+  });
 });

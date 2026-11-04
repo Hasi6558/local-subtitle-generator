@@ -104,6 +104,62 @@ def test_auth_origin_host_and_path_restrictions(api, tmp_path):
     )  # strict session cookie
 
 
+def test_contextual_pairs_comparison_and_saved_edits(api):
+    client, app, root, media = api
+    first, cues = complete_job(api)
+    request = {
+        "path": str(media),
+        "audio_stream": first["audio_stream"],
+        "duration_ms": first["sample_duration_ms"],
+        "comparison_job_id": first["job_id"],
+        "settings": {"pipeline": "contextual", "source_language": "ja"},
+    }
+    response = client.post("/jobs", json=request)
+    assert response.status_code == 201, response.text
+    second = response.json()
+    assert (
+        second["comparison_job_id"] == first["job_id"]
+        and second["parent_job_id"] is None
+    )
+    path = root / second["job_id"] / "generated_cues.json"
+    write_json(
+        path, [c | {"text": "Translation", "source_text": "こんにちは"} for c in cues]
+    )
+    second.update(state="completed", artifacts={"generated_cues.json": str(path)})
+    write_json(root / second["job_id"] / "manifest.json", second)
+    current = client.get(f"/jobs/{first['job_id']}/cues").json()
+    client.put(
+        f"/jobs/{first['job_id']}/cues",
+        json={
+            "expected_revision": current["revision"],
+            "cues": [c | {"text": "My edit"} for c in cues],
+        },
+    )
+    report = client.get(f"/jobs/{first['job_id']}/compare/{second['job_id']}").json()
+    assert report["human_meaning"] == "unverified"
+    assert report["rows"][0]["cue"]["text"] == "My edit"
+    assert report["rows"][0]["matches"][0]["source_text"] == "こんにちは"
+    assert client.post("/jobs", json=request | {"start_ms": 100}).status_code == 422
+    assert (
+        client.post(
+            "/jobs",
+            json=request
+            | {"settings": {"pipeline": "contextual", "source_language": "ru"}},
+        ).status_code
+        == 422
+    )
+    assert client.get("/translation-models").json()["source_languages"] == [
+        "en",
+        "ja",
+        "ko",
+        "zh",
+        "fr",
+        "de",
+        "es",
+        "hi",
+    ]
+
+
 def test_registered_media_ranges_and_progress(api):
     client, app, root, media = api
     manifest = create_job(api)

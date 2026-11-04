@@ -976,3 +976,46 @@ code {
     white-space: normal;
   }
 }
+.pipeline-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  border: 0;
+  padding: 0.5rem 0;
+  margin: 0.5rem 0;
+}
+.pipeline-toggle legend {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.pipeline-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid #ccd4cf;
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  cursor: pointer;
+}
+.pipeline-toggle input {
+  width: auto;
+}
+.pipeline-toggle .active {
+  background: #e1efe6;
+  color: #214e3a;
+  border-color: #689781;
+}
+.contextual-options {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.pipeline-comparison {
+  margin-bottom: 1.5rem;
+}
+.source-text {
+  background: #f2f5f1;
+  padding: 0.8rem;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}

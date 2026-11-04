@@ -156,7 +156,11 @@ def assess(cues, policy=None, playable_end_ms=None, speech=None):
                     issue["cue_id"] == identity and issue["code"] == flag
                     for issue in issues
                 ):
-                    add(flag, "Review the preserved inference/boundary flag", identity)
+                    explanation = {
+                        "unresolved_name_or_term": "Check this possible name/term against the source; the katakana heuristic also flags ordinary loanwords and misses some names",
+                        "glossary_review": "A supplied glossary rendering was not found in the translation; review terminology against the source",
+                    }.get(flag, "Review the preserved inference/boundary flag")
+                    add(flag, explanation, identity)
     for index, cue in enumerate(valid):
         text = normalized(cue["text"])
         if text and any(
