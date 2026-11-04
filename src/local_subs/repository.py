@@ -32,7 +32,7 @@ class JobRepository:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("BEGIN IMMEDIATE")
             schema = connection.execute("PRAGMA user_version").fetchone()[0]
-            if schema > 2:
+            if schema > 3:
                 raise ValueError("Job database is newer than this application")
             if schema < 1:
                 connection.execute(
@@ -51,6 +51,11 @@ class JobRepository:
                     "CREATE TABLE exports (id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES jobs(id), cue_revision INTEGER NOT NULL, directory TEXT NOT NULL, created_at TEXT NOT NULL)"
                 )
                 connection.execute("PRAGMA user_version=2")
+            if schema < 3:
+                connection.execute(
+                    "CREATE TABLE previews (job_id TEXT NOT NULL REFERENCES jobs(id), cache_key TEXT NOT NULL, state TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(job_id,cache_key))"
+                )
+                connection.execute("PRAGMA user_version=3")
 
     @contextmanager
     def connect(self):
@@ -285,3 +290,53 @@ class JobRepository:
             if not row:
                 raise KeyError("Export not found")
             return dict(row)
+
+    def preview(self, job_id, key=None):
+        with self.connect() as connection:
+            if key is None:
+                row = connection.execute(
+                    "SELECT data FROM previews WHERE job_id=? ORDER BY updated_at DESC LIMIT 1",
+                    (job_id,),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT data FROM previews WHERE job_id=? AND cache_key=?",
+                    (job_id, key),
+                ).fetchone()
+            if not row:
+                raise KeyError("No preview has been prepared")
+            return json.loads(row[0])
+
+    def save_preview(self, data):
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO previews VALUES(?,?,?,?,?) ON CONFLICT(job_id,cache_key) DO UPDATE SET state=excluded.state,data=excluded.data,updated_at=excluded.updated_at",
+                (
+                    data["job_id"],
+                    data["cache_key"],
+                    data["state"],
+                    json.dumps(data, ensure_ascii=False),
+                    now(),
+                ),
+            )
+
+    def recover_previews(self):
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT data FROM previews WHERE state IN ('queued','processing')"
+            ).fetchall()
+            for row in rows:
+                data = json.loads(row[0])
+                data.update(
+                    state="failed",
+                    error="Preview preparation was interrupted; request it again",
+                )
+                connection.execute(
+                    "UPDATE previews SET state='failed',data=?,updated_at=? WHERE job_id=? AND cache_key=?",
+                    (
+                        json.dumps(data, ensure_ascii=False),
+                        now(),
+                        data["job_id"],
+                        data["cache_key"],
+                    ),
+                )

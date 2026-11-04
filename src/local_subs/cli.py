@@ -48,7 +48,15 @@ def serve(
         console.print(
             "Media registration is restricted to the configured media folders. Ctrl+C stops the server and checkpoints/cancels active work."
         )
-        uvicorn.run(application, host="127.0.0.1", port=port, access_log=False)
+        uvicorn.run(
+            application,
+            host="127.0.0.1",
+            port=port,
+            access_log=False,
+            loop="asyncio:SelectorEventLoop"
+            if platform.system() == "Windows"
+            else "auto",
+        )
     except Exception as exc:
         fail(exc)
 

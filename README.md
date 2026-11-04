@@ -1,11 +1,11 @@
 # Local subtitle generator
 
 Offline multilingual-to-English movie subtitles, built one phase at a time.
-Phase 4 adds an authenticated localhost API, durable SQLite queue, a separate
-inference worker, versioned cue editing, and registered-media streaming to the
-existing CLI, subtitle exports/QC, checkpoints/resume and local benchmarks.
-A 10-minute Japanese dialogue test passed; human translation/timing review and
-full-movie inference acceptance remain pending.
+Phase 5 adds local browser review: playback, cue editing, autosave/conflict
+recovery, split/merge/undo, QC filters and revision exports. The CLI, local API,
+durable queue and offline inference remain available. A full-movie CLI
+generate/resume/validate/export check passed; meaning and viewed synchronization
+still need human review.
 
 Windows setup (Python 3.11, 64-bit): install FFmpeg and put its `bin` directory on
 PATH, then open PowerShell in this repository:
@@ -219,15 +219,23 @@ $env:LOCAL_SUBS_MODEL_CACHE = "models"
 .venv\Scripts\python -m pytest tests/test_model_integration.py -q
 ```
 
-Local API (no browser UI yet):
+Local review interface and API:
 
 ```powershell
-.venv\Scripts\local-subs serve --output-dir outputs --media-root test-video --model-cache models
+npm --prefix web ci
+npm --prefix web run build
+.venv\Scripts\local-subs serve --output-dir outputs/phase2-movie --media-root test-video --model-cache models
 ```
+
+Open **http://127.0.0.1:8765**. In another terminal, read the session key with
+`Get-Content outputs/phase2-movie/.service/token` and paste it into Connect.
+The example opens the tested full-movie library. Use the same `--output-dir` as
+your jobs; `outputs` alone is a separate index. Node is only needed to build/test
+the UI; CLI and API work without it. See `web/README.md` for the review workflow.
 
 The server binds to `127.0.0.1:8765`; `--port` changes the port. Repeat
 `--media-root` to approve additional folders. Defaults approve only the current
-working directory. A local bearer token is stored in `outputs/.service/token`;
+working directory. A local bearer token is stored in the output root's `.service/token`;
 the token is not printed or sent to a hosted service. See `docs/API.md` for
 PowerShell requests, routes, cue revision conflicts and shutdown/recovery behavior.
 

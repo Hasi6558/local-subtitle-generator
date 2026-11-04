@@ -49,3 +49,14 @@ coverage is heuristic, not translation accuracy or proof of completeness.
 The supplied full-movie reference SRT has 886 cues, zero structural errors and
 319 review warnings under these defaults. This is validation of the reference
 file's structure/readability only; full-movie generated output remains unverified.
+
+Phase 5 update: the supplied 7378.389-second movie subsequently completed direct
+small/CPU/int8 inference with 25 chunks and 659 cues. Resume reused every completed
+checkpoint; SRT/VTT structure and re-export passed. Recorded cumulative service
+time was 941.396 seconds across attempts/resume, not a clean wall-clock benchmark:
+a live schema upgrade interrupted the older worker and an unrecorded tail may be
+absent. Mid-run observed process peak working set was 1,069,432,832 bytes. This
+does not replace a controlled full-run peak-memory measurement. QC review issues
+include long durations, boundary concerns and 11 VAD regions without output.
+Human meaning and viewed synchronization remain unverified. Full local details
+are in outputs/phase5-movie-gate.json; no runtime is generalized to other movies.

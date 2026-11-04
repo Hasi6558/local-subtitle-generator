@@ -10,7 +10,9 @@ Binding is fixed to 127.0.0.1; the default port is 8765. Media must be an existi
 file in an approved root. Repeat `--media-root` to approve other folders. The
 server controls the output root and model cache; request settings cannot change
 these locations. Models must already be explicitly prepared. There is no upload
-endpoint, account system, hosted inference, browser review UI or public file server.
+endpoint, account system, hosted inference or public file server. Phase 5 serves
+the built review interface at `/`; only the HTML and hashed `/assets/` files are
+public. Job/media/edit/export routes still require a local session/token.
 
 Use a second PowerShell terminal for requests:
 
@@ -81,7 +83,7 @@ QC JSON and formatted cue JSON; there is no arbitrary path-download endpoint.
 API exports do not rerun coverage VAD. Missing coverage is explicitly reported;
 QC success never establishes translation meaning or exact synchronization.
 
-SQLite schema migrations use `PRAGMA user_version` (currently 2). Job manifests,
+SQLite schema migrations use `PRAGMA user_version` (currently 3). Job manifests,
 queue claims/cancellation, cue revisions and export registration share one
 repository. On first indexing, unseen legacy manifests are imported. Later JSON
 snapshots cannot override authoritative DB state. CLI inference/queue work share
@@ -105,6 +107,20 @@ folders together; do not edit/delete SQLite to repair a job.
 Verification: real localhost HTTP requests remained responsive during cached
 small/CPU/int8 inference. A deliberate worker crash after the first checkpoint
 was recovered without rewriting that checkpoint, producing 13 cues. Edits and
-cancellation state survived a full server restart. Full-movie generated-output,
-GPU and human translation/timing acceptance remain unverified. The plan's real
-movie gate still applies before building a review UI.
+cancellation state survived a full server restart. Phase 5 subsequently completed
+the full-movie CLI generate/resume/validate/export technical gate before UI work.
+GPU and human translation/timing acceptance remain unverified.
+
+Phase 5 adds GET `/models` (cache-only prepared model metadata), GET
+`/jobs/{id}/cue-revisions`, GET `/jobs/{id}/qc?revision=N`, and GET
+`/jobs/{id}/playback` (selected/default audio metadata). A different selected audio
+track requires a preview before browser playback. Create a preview with POST
+`/jobs/{id}/preview`, body `{ "force_transcode": false }`; poll GET of the same
+route with its `key`, then stream GET `/jobs/{id}/preview/media?key=...`.
+Preview state is separate in SQLite schema 3 and never overwrites inference state.
+One owned encoder runs asynchronously; completed files are content-hash checked.
+
+POST `/jobs` additionally accepts optional `parent_job_id` for a replacement
+proposal. The parent must reference the same source file. Parent cues/edits stay
+unchanged; the UI requires explicit proposed-text acceptance. No generic path/file
+download, browser upload or automatic replacement of manual corrections was added.
