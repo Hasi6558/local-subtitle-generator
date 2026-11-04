@@ -106,3 +106,32 @@
 - Measurements support a provisional CPU test preset, not a quality winner.
   Full-movie generated-output and human meaning/synchronization gates remain open;
   do not claim v0.2 release readiness or proceed to a UI based on QC success alone.
+
+## Phase 4
+
+- Use one SQLite repository for CLI and API job state, queue claims, cancellation,
+  immutable cue revisions and registered exports. WAL and short transactions support
+  concurrent reads. User-version migrations create schema 1 then schema 2. Legacy
+  snapshots import only when a DB entry is absent; JSON remains a snapshot, not a
+  second authority. Cancellation control merges transactionally with worker saves.
+- Split job preparation from execution. API preparation persists queued jobs; a
+  separate local process claims and runs the existing chunked service. Foreground
+  CLI work is explicitly excluded from automatic queue claims. One root lock
+  serializes inference, and a service lock prevents duplicate supervisors.
+- Supervise process crashes with at most three restarts. Reconcile stale claims
+  against checkpoints; ordinary inference failures remain failed until explicit
+  retry. Graceful shutdown cancels active work, preserves pending queue entries,
+  and terminates only the owned worker after a five-second grace period.
+- Bind only to loopback. Require a persistent local bearer/session token, reject
+  unknown browser origins/hosts, and expose registered media only under approved
+  roots. Use Starlette FileResponse's verified range implementation. No arbitrary
+  file route, wildcard CORS, hosted API, uploads, CDN-backed docs or review UI.
+- Store generated cue revision 0 immutably. Use transactional compare-and-swap
+  edit revisions, return 409 on stale writes, and export selected revisions into
+  new folders. Manual edits are preserved through retries/regeneration.
+- API exports share core formatting/validation but skip VAD for predictable request
+  latency and explicitly mark coverage unavailable. CLI export can still run VAD.
+- Test real loopback HTTP while a separate process performs CPU inference, crash
+  the test-owned worker after a durable checkpoint, then verify recovery, byte
+  ranges, edit persistence and server restart. CPU success does not verify GPU or
+  full-movie timing/meaning; the pre-UI real-movie gate remains open.
