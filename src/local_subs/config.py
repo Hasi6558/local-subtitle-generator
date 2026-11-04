@@ -1,6 +1,7 @@
 import tomllib
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def languages():
@@ -21,6 +22,12 @@ class Settings(BaseModel):
     speech_model: str = "medium"
     model_cache: Path = Path.home() / ".cache" / "local-subs" / "models"
     output_dir: Path = Path("outputs")
+    device: Literal["auto", "cpu", "cuda"] = "cpu"
+    compute_type: str | None = None
+    vad: bool = True
+    beam_size: int = Field(default=5, ge=1, le=20)
+    detection_threshold: float = Field(default=0.7, gt=0, le=1)
+    detection_attempts: int = Field(default=3, ge=1, le=10)
 
     @model_validator(mode="after")
     def model_language(self):
