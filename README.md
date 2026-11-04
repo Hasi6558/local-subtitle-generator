@@ -1,10 +1,10 @@
 # Local subtitle generator
 
 Offline multilingual-to-English movie subtitles, built one phase at a time.
-Phase 2 provides chunked offline English SRT generation, checkpoints and resume,
-job management, environment checks, and explicit model preparation. A 10-minute
-Japanese dialogue test passed; human translation/timing review and full-movie
-inference acceptance remain pending.
+Phase 3 provides chunked offline English SRT/VTT generation, readability and QC
+reports, checkpoints/resume, formatting-only exports, and local benchmarks.
+A 10-minute Japanese dialogue test passed; human translation/timing review and
+full-movie inference acceptance remain pending.
 
 Windows setup (Python 3.11, 64-bit): install FFmpeg and put its `bin` directory on
 PATH, then open PowerShell in this repository:
@@ -140,7 +140,68 @@ Use `--chunk-seconds 120 --overlap-seconds 5` to exercise more boundaries. Keep 
 Phase 1 baseline with `generate ... --single-pass` for comparison. That baseline
 loads the entire selection into memory and does not support checkpoint resume.
 Phase 1 job IDs cannot be resumed by the chunked pipeline; create a new job.
-Readability formatting, VTT, and general QC reports are Phase 3.
+Default generation also writes `formatted_cues.json`, `subtitles.en.vtt`, and
+`qc.json`. `generated_cues.json` and raw segments remain unformatted inputs.
+
+Readability targets are configurable review defaults: 42 characters per line,
+two lines, 1–7 seconds per cue, and 17 characters/second. Wrapping preserves all
+words; an unbreakable word or a cue requiring more lines is retained and flagged.
+Long translated segments retain their original timing and are flagged for manual
+review; no English word alignment or proportional split timings are invented.
+VTT escapes plain-text markup characters and is round-trip checked with webvtt-py.
+
+Validation and inference-free re-export:
+
+```powershell
+.venv\Scripts\local-subs validate "D:\Subtitles\subtitles.en.srt" --duration 02:03:00 --report outputs/validation.json
+.venv\Scripts\local-subs export JOB_ID --output-dir outputs --line-width 40 --max-lines 2 --max-cps 17
+.venv\Scripts\local-subs export JOB_ID --output-dir outputs --cues "D:\Subtitles\edited_cues.json" --no-check-coverage
+```
+
+`validate` accepts SRT, strict VTT, or a JSON cue list. Each JSON cue needs a string
+`id`, integer `start_ms`/`end_ms`, and nonempty `text`. Structural errors return
+exit code 1; readability/overlap/repetition warnings remain review hints. Supply
+duration to check the playable upper bound. Validation reports are not overwritten;
+choose a new report path for another run.
+
+`export` creates a new UUID revision without loading a speech model. It defaults
+to stored generated cues; `--cues` can explicitly select edited JSON/SRT/VTT.
+It snapshots the selected input and formatting policy, preserving earlier exports
+and edits. New policies recompute readability flags while preserving boundary flags.
+It checks coverage using local VAD when prepared audio remains available; after
+cleanup, coverage is reported unavailable. Coverage/repetition flags are heuristic
+and cannot prove complete dialogue recovery or semantic accuracy.
+
+Set generation/export review defaults in TOML:
+
+```toml
+[formatting]
+line_width = 42
+max_lines = 2
+min_duration_ms = 1000
+max_duration_ms = 7000
+max_cps = 17
+```
+
+Pass `--config settings.toml` to generate, validate or export. Export's formatting
+flags override the config. Formatting settings are excluded from inference cache
+identity, so changed formatting reuses matching chunks. Existing Phase 1/2 jobs
+can use `export` directly; no resume or model load is needed to reformat them.
+
+Benchmark the same sample with explicitly prepared models:
+
+```powershell
+.venv\Scripts\local-subs benchmark "D:\Movies\sample.mp4" --models small --devices cpu --beam-sizes 1,5 --runs 2 --duration 30 --source-language ja --model-cache models --compute-type int8 --output-dir outputs
+```
+
+Comma-separated models/devices/beam sizes create a serial matrix. Each preset runs
+in a fresh worker process, with the model reused for later repetitions. No model
+downloads occur. `benchmark.json` records stage times, total seconds, real-time
+factor, available process peak memory, QC flags, actual model/device/revision, and
+unverified human ratings. A failed preset is recorded and not automatically retried;
+the command returns nonzero if any preset fails. Weights are cached, OS disk cache
+is uncontrolled, and reported peak memory is process-lifetime RSS, not GPU VRAM.
+See `docs/BENCHMARKS.md` for measurements and the provisional CPU test preset.
 
 Test the provided clip with the prepared `small` model:
 

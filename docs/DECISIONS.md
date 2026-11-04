@@ -80,3 +80,29 @@
 - Keep the user's complete test-video directory ignored, including reference SRT.
   Full-movie preparation is tested, but full-movie model inference and human
   timing/meaning acceptance remain explicitly unverified.
+
+## Phase 3
+
+- Apply word-boundary wrapping without deleting text or changing model timings.
+  Keep more than two lines or long unbreakable words when necessary and flag them.
+  Long translated segments are flagged for manual review; automatic timing splits
+  would imply unsupported English alignment precision.
+- Store formatting policy separately from inference identity. Re-export stored
+  cues with new thresholds without loading a speech model; preserve generated/raw
+  inputs, boundary flags, earlier exports and manual edits. Recompute derived
+  readability flags rather than retaining stale threshold results.
+- Use webvtt-py 0.7.0 for strict VTT parsing/round-trip verification, alongside the
+  existing SRT serializer. Escape plain-text markup characters in generated VTT.
+- QC structural errors prevent export; warnings flag review needs without dropping
+  cues. A new export revision captures selected cues, input hash and original job
+  manifest. No user report file is overwritten automatically.
+- Coverage uses bounded local Silero VAD and temporal overlap. Report missing
+  audio/coverage explicitly, never infer missing dialogue or semantic accuracy from
+  a numerical coverage score alone. Repetition is also a heuristic flag only.
+- Benchmark each preset in an isolated worker process; reuse one model for warm
+  repetitions. Record actual stage/total timings, RTF, model revision, process peak
+  RSS where supported, cache conditions, errors and unverified human ratings.
+  OS cache is uncontrolled; process peak is cumulative, and GPU memory is unmeasured.
+- Measurements support a provisional CPU test preset, not a quality winner.
+  Full-movie generated-output and human meaning/synchronization gates remain open;
+  do not claim v0.2 release readiness or proceed to a UI based on QC success alone.

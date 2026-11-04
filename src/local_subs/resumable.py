@@ -16,7 +16,6 @@ from local_subs.config import Settings
 from local_subs.inference import POLICY, cache_key, load_model, resolve_language
 from local_subs.jobs import atomic_text, fingerprint, write_json
 from local_subs.media import extract_audio, inspect_media, milliseconds, select_track
-from local_subs.subtitles import compose
 from local_subs.worker import active_worker, worker_lock
 
 PIPELINE = "chunked-v1"
@@ -118,6 +117,17 @@ def run(directory, manifest, settings, notify, model_loader):
         )
 
         model = None
+        manifest.setdefault("stage_seconds", {})
+
+        def timed_call(name, function, *args, **kwargs):
+            started = time.perf_counter()
+            try:
+                return function(*args, **kwargs)
+            finally:
+                totals = manifest["stage_seconds"]
+                totals[name] = round(
+                    totals.get(name, 0) + time.perf_counter() - started, 6
+                )
 
         def save():
             manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -139,13 +149,13 @@ def run(directory, manifest, settings, notify, model_loader):
         save()
         try:
             source = Path(manifest["source_path"])
-            info = inspect_media(source)
+            info = timed_call("inspection", inspect_media, source)
             track = select_track(
                 info, settings.source_language, manifest["audio_stream"]
             )
             stat = source.stat()
             manifest["stage"] = "fingerprint"
-            digest = fingerprint(source)
+            digest = timed_call("fingerprint", fingerprint, source)
             manifest["source"] = {
                 "path": str(source),
                 "size": stat.st_size,
@@ -195,7 +205,16 @@ def run(directory, manifest, settings, notify, model_loader):
                     notify(
                         "Extracting selected track to disk (no full audio array in memory)"
                     )
-                    extract_audio(source, track, info, temporary, start, duration)
+                    timed_call(
+                        "extraction",
+                        extract_audio,
+                        source,
+                        track,
+                        info,
+                        temporary,
+                        start,
+                        duration,
+                    )
                     wav_info(temporary)
                     os.replace(temporary, audio_path)
                 finally:
@@ -220,7 +239,9 @@ def run(directory, manifest, settings, notify, model_loader):
                 }
             )
             if manifest.get("plan_key") != plan_key:
-                manifest["chunks"] = plan_chunks(
+                manifest["chunks"] = timed_call(
+                    "chunk_planning",
+                    plan_chunks,
                     audio_path,
                     start,
                     end,
@@ -236,7 +257,13 @@ def run(directory, manifest, settings, notify, model_loader):
                 k: v
                 for k, v in settings.model_dump(mode="json").items()
                 if k
-                not in ("output_dir", "chunk_seconds", "overlap_seconds", "model_cache")
+                not in (
+                    "output_dir",
+                    "chunk_seconds",
+                    "overlap_seconds",
+                    "model_cache",
+                    "formatting",
+                )
             }
             resolution_key = cache_key(
                 {
@@ -263,22 +290,30 @@ def run(directory, manifest, settings, notify, model_loader):
                     chunk["context_end_ms"] - start,
                 )
                 speech = (
-                    get_speech_timestamps(audio)
+                    timed_call("vad", get_speech_timestamps, audio)
                     if settings.vad or settings.source_language == "auto"
                     else ([{"start": 0, "end": len(audio)}] if audio.any() else [])
                 )
                 if speech and model is None:
                     manifest["stage"] = "model_loading"
                     save()
-                    model, runtime = model_loader(settings, notify)
+                    model, runtime = timed_call(
+                        "model_loading", model_loader, settings, notify
+                    )
                     # A different snapshot invalidates language resolution and inference.
                     if manifest.get("runtime") != runtime:
                         manifest["resolved_source_language"] = None
                     manifest["runtime"] = runtime
                     manifest["stage"] = "chunks"
                 if speech and not manifest.get("resolved_source_language"):
-                    language, diagnostics = resolve_language(
-                        model, audio, settings, chunk["context_start_ms"], speech
+                    language, diagnostics = timed_call(
+                        "language_resolution",
+                        resolve_language,
+                        model,
+                        audio,
+                        settings,
+                        chunk["context_start_ms"],
+                        speech,
                     )
                     manifest["resolved_source_language"] = language
                     manifest["language_detection"] = diagnostics
@@ -325,6 +360,7 @@ def run(directory, manifest, settings, notify, model_loader):
                     chunk["state"] = "processing"
                     save()
                     if speech:
+                        inference_began = time.perf_counter()
                         task = "transcribe" if language == "en" else "translate"
                         manifest["task"] = task
                         iterator, _ = model.transcribe(
@@ -350,6 +386,13 @@ def run(directory, manifest, settings, notify, model_loader):
                                     "model_result": asdict(segment),
                                 }
                             )
+                        totals = manifest["stage_seconds"]
+                        totals["inference"] = round(
+                            totals.get("inference", 0)
+                            + time.perf_counter()
+                            - inference_began,
+                            6,
+                        )
                     write_json(checkpoint, {"key": key, "segments": segments})
                     chunk.update(
                         key=key,
@@ -366,7 +409,9 @@ def run(directory, manifest, settings, notify, model_loader):
                 check_cancel()
             manifest["state"], manifest["stage"] = "exporting", "stitch"
             save()
-            raw, cues, report = stitch(manifest["chunks"], results, start, end)
+            raw, cues, report = timed_call(
+                "stitching", stitch, manifest["chunks"], results, start, end
+            )
             revision = directory / "exports" / uuid4().hex
             revision.mkdir(parents=True)
             for name, data in [
@@ -375,7 +420,22 @@ def run(directory, manifest, settings, notify, model_loader):
                 ("boundaries.json", report),
             ]:
                 write_json(revision / name, data)
-            atomic_text(revision / "subtitles.en.srt", compose(cues, end))
+            from local_subs.exports import write_quality_artifacts
+            from local_subs.quality import speech_regions
+
+            speech = timed_call("coverage_vad", speech_regions, audio_path, start)
+            qc = timed_call(
+                "quality_export",
+                write_quality_artifacts,
+                revision,
+                cues,
+                end,
+                settings.formatting,
+                speech,
+            )
+            manifest["qc_summary"] = {
+                key: qc[key] for key in ("error_count", "warning_count", "issue_counts")
+            }
             manifest["artifacts"] = {
                 name: str(revision / name)
                 for name in (
@@ -383,6 +443,9 @@ def run(directory, manifest, settings, notify, model_loader):
                     "generated_cues.json",
                     "boundaries.json",
                     "subtitles.en.srt",
+                    "subtitles.en.vtt",
+                    "formatted_cues.json",
+                    "qc.json",
                 )
             }
             manifest["cue_count"] = len(cues)

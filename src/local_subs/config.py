@@ -2,6 +2,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from local_subs.policy import FormattingPolicy
 
 
 def languages():
@@ -30,6 +31,7 @@ class Settings(BaseModel):
     detection_attempts: int = Field(default=3, ge=1, le=10)
     chunk_seconds: int = Field(default=300, ge=5, le=900)
     overlap_seconds: int = Field(default=5, ge=0, le=30)
+    formatting: FormattingPolicy = Field(default_factory=FormattingPolicy)
 
     @model_validator(mode="after")
     def model_language(self):
