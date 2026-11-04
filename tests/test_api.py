@@ -45,6 +45,30 @@ def create_job(api):
     return response.json()
 
 
+def test_native_picker_selection_cancel_auth_and_root_restriction(
+    api, monkeypatch, tmp_path
+):
+    client, app, root, media = api
+    monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: media)
+    assert client.post("/media/pick", headers={"Authorization": ""}).status_code == 401
+    assert (
+        client.post(
+            "/media/pick", headers={"Origin": "https://example.com"}
+        ).status_code
+        == 403
+    )
+    assert client.post("/media/pick").json() == {"path": str(media.resolve())}
+    monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: None)
+    assert client.post("/media/pick").json() == {"path": None}
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"video")
+    monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: outside)
+    assert client.post("/media/pick").status_code == 403
+    # A failed selection releases the picker lock for the next request.
+    monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: media)
+    assert client.post("/media/pick").status_code == 200
+
+
 def complete_job(api):
     client, app, root, media = api
     manifest = create_job(api)

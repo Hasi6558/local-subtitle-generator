@@ -4,6 +4,7 @@ import copy
 import hmac
 import secrets
 import asyncio
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -75,6 +76,7 @@ def create_app(
     repository = JobRepository(root)
     repository.import_snapshots()
     cache = Path(model_cache or Settings().model_cache).resolve()
+    picker_lock = threading.Lock()
     token_path = root / ".service" / "token"
     if token is None:
         if token_path.is_file():
@@ -227,6 +229,18 @@ def create_app(
     @app.post("/media/inspect")
     def inspect(request: InspectRequest):
         return inspect_media(allowed_media(request.path, roots))
+
+    @app.post("/media/pick")
+    def pick_media():
+        from local_subs.file_picker import pick_file
+
+        if not picker_lock.acquire(blocking=False):
+            raise Conflict("A file picker is already open on this computer")
+        try:
+            selected = pick_file(roots[0])
+            return {"path": str(allowed_media(selected, roots)) if selected else None}
+        finally:
+            picker_lock.release()
 
     @app.get("/models")
     def models():

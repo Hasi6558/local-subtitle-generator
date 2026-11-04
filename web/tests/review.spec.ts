@@ -27,6 +27,43 @@ async function saved(page: Page) {
   await expect(page.locator(".save-state")).toContainText("Saved");
 }
 
+test("choose video inspects automatically and cancellation preserves selection", async ({
+  page,
+  request,
+}) => {
+  const job = await fixture(request);
+  await connect(page, job.job_id);
+  await page
+    .locator(".sidebar")
+    .getByRole("link", { name: /New subtitles/ })
+    .click();
+  let cancelled = false;
+  await page.route("**/media/pick", (route) =>
+    route.fulfill({ json: { path: cancelled ? null : job.source_path } }),
+  );
+  await page
+    .getByRole("button", { name: "Choose video…", exact: true })
+    .click();
+  await expect(page.getByLabel("Audio track")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Create English subtitles →" }),
+  ).toBeEnabled();
+  await expect(page.getByText("sample.mp4", { exact: true })).toBeVisible();
+  cancelled = true;
+  await page
+    .getByRole("button", { name: "Choose video…", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Create English subtitles →" }),
+  ).toBeEnabled();
+  await page.getByText("Enter path manually", { exact: true }).click();
+  await expect(page.getByLabel("Local file path")).toHaveValue(job.source_path);
+  await page.screenshot({
+    path: "test-results/file-picker-form.png",
+    fullPage: true,
+  });
+});
+
 test("pipeline toggle creates paired results and preserves separate edits", async ({
   page,
   request,
@@ -294,6 +331,7 @@ test("new job, queue cancellation, and a replacement proposal require explicit t
     .locator(".sidebar")
     .getByRole("link", { name: /New subtitles/ })
     .click();
+  await page.getByText("Enter path manually", { exact: true }).click();
   await page.getByLabel("Local file path").fill(job.source_path);
   await page
     .getByRole("button", { name: "Inspect video", exact: true })

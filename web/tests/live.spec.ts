@@ -19,6 +19,7 @@ test("real local video: create, infer, review, edit, reload, preview, seek and e
     .locator(".sidebar")
     .getByRole("link", { name: /New subtitles/ })
     .click();
+  await page.getByText("Enter path manually", { exact: true }).click();
   await page.getByLabel("Local file path").fill(info.source);
   await page
     .getByRole("button", { name: "Inspect video", exact: true })
