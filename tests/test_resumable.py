@@ -276,3 +276,19 @@ def test_track_change_and_resolved_language_invalidate(setup):
     resume(directory.name, settings.output_dir, model_loader=loader)
     assert model.calls == 9
     assert read_manifest(directory)["task"] == "transcribe"
+
+
+def test_formatting_change_reuses_inference(setup):
+    media, settings, model, loader = setup
+    directory = generate(media, settings, model_loader=loader)
+    assert model.calls == 3
+    resume(
+        directory.name,
+        settings.output_dir,
+        {"formatting": {"line_width": 20}},
+        model_loader=loader,
+    )
+    assert model.calls == 3
+    manifest = read_manifest(directory)
+    assert Path(manifest["artifacts"]["qc.json"]).is_file()
+    assert Path(manifest["artifacts"]["subtitles.en.vtt"]).is_file()

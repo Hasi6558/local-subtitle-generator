@@ -1,5 +1,42 @@
 # Progress
 
+## Phase 3: implemented; measured short-clip benchmark; acceptance gates open
+
+Implemented: configurable wrapping/readability targets; structural and review QC;
+preserved boundary flags; heuristic VAD coverage/missing-region checks; strict VTT
+round-trip export; validate/export/benchmark commands; immutable formatting-only
+revisions; formatting excluded from inference invalidation; stage performance
+timers; isolated serial benchmarks with cold/warm model instances and peak RSS.
+
+Verification on 4 November 2026:
+- Default suite: 34 tests passed, 2 opt-in inference tests skipped. Includes text
+  and timing preservation, unbreakable words, policy changes, invalid timing/IDs,
+  overlap/repetition, speech without cues, Unicode/entity VTT round trips, strict
+  malformed VTT handling, immutable exports without inference, benchmark failure
+  recording, and unchanged inference reuse after formatting changes.
+- Ruff, pip check and git diff --check passed. No cloud APIs or model downloads.
+- Re-exported the existing 650.540-second Japanese dialogue result without model
+  inference: 171 cues, zero structural errors, 70 review issues. New local revision:
+  `outputs/phase2-dialogue/68bdb01e6e15497f8588b941e7b8ef62/exports/8f9b9432e25e4570a1cf1ad3579bc6ce`.
+  Standalone VTT validation against duration passed. Prior raw/generated cues and
+  exports remain unchanged. QC issues are retained for human review.
+- Real short-clip benchmark: small/CPU/int8 on the same 36-second Japanese sample,
+  beam 1 and 5, two repetitions each. Cold/warm total seconds: beam 1 10.757/8.635;
+  beam 5 13.512/12.158. About 775 MB worker peak RSS; zero structural/readability
+  issues on this short sample. Human ratings unverified. Detailed measured stage
+  times, cache/memory scope, model revision and provisional preset are recorded in
+  docs/BENCHMARKS.md and the local machine-readable report.
+- Validated supplied full-movie reference SRT: 886 cues, zero structural errors,
+  319 review warnings. This validates the reference, not generated movie subtitles.
+
+Open gates: full-movie inference/resume/validate/export with human synchronization
+review; semantic accuracy; representative whispers/music/overlap/dialects; medium,
+GPU and a second source language. No quality winner or universal runtime estimate
+is claimed. Keep v0.2 acceptance pending; QC cannot establish movie readiness.
+
+Next action: user review and confirmation before Phase 4 local API/persistent worker.
+Keep the plan's real-movie gate before a review UI; no UI/API work started here.
+
 ## Phase 2: implemented; real dialogue resume verified; movie inference pending
 
 Implemented: disk-backed audio with bounded ownership/context chunks; quiet-cut

@@ -26,6 +26,150 @@ def fail(exc):
     raise typer.Exit(1)
 
 
+def formatting_policy(
+    config=None,
+    line_width=None,
+    max_lines=None,
+    min_cue_seconds=None,
+    max_cue_seconds=None,
+    max_cps=None,
+):
+    from local_subs.policy import FormattingPolicy
+
+    data = load_settings(config).formatting.model_dump()
+    changes = {
+        "line_width": line_width,
+        "max_lines": max_lines,
+        "min_duration_ms": round(min_cue_seconds * 1000)
+        if min_cue_seconds is not None
+        else None,
+        "max_duration_ms": round(max_cue_seconds * 1000)
+        if max_cue_seconds is not None
+        else None,
+        "max_cps": max_cps,
+    }
+    return FormattingPolicy.model_validate(
+        data | {k: v for k, v in changes.items() if v is not None}
+    )
+
+
+@app.command("validate")
+def validate_command(
+    subtitles: Path,
+    duration: str | None = None,
+    config: Path | None = None,
+    report: Path | None = None,
+):
+    """Validate SRT, VTT or cue JSON; exit 1 for structural errors, warnings remain review hints."""
+    from local_subs.quality import read_cues, assess
+    from local_subs.jobs import write_json
+
+    try:
+        policy = formatting_policy(config)
+        try:
+            result = assess(
+                read_cues(subtitles), policy, parse_time(duration) if duration else None
+            )
+        except (ValueError, OSError) as exc:
+            result = {
+                "error_count": 1,
+                "warning_count": 0,
+                "issues": [
+                    {"code": "parse_error", "severity": "error", "message": str(exc)}
+                ],
+            }
+        if report:
+            if report.exists():
+                raise ValueError(
+                    "Report file already exists; choose a new path to preserve it"
+                )
+            write_json(report, result)
+        console.print_json(data=result)
+    except Exception as exc:
+        fail(exc)
+    if result["error_count"]:
+        raise typer.Exit(1)
+
+
+@app.command("export")
+def export_command(
+    job_id: str,
+    output_dir: Path = Path("outputs"),
+    cues: Path | None = None,
+    config: Path | None = None,
+    line_width: int | None = None,
+    max_lines: int | None = None,
+    min_cue_seconds: float | None = None,
+    max_cue_seconds: float | None = None,
+    max_cps: float | None = None,
+    check_coverage: bool = True,
+):
+    """Create a new formatted SRT/VTT/QC revision without speech-model inference."""
+    from local_subs.exports import export_job
+
+    try:
+        policy = formatting_policy(
+            config, line_width, max_lines, min_cue_seconds, max_cue_seconds, max_cps
+        )
+        revision, report = export_job(job_id, output_dir, cues, policy, check_coverage)
+        console.print(
+            f"Export: {revision}; {report['cue_count']} cues, {report['warning_count']} review issues",
+            markup=False,
+        )
+        console.print(
+            "Timings retained. Review qc.json; no automatic meaning or timing accuracy verdict."
+        )
+    except Exception as exc:
+        fail(exc)
+
+
+@app.command("benchmark")
+def benchmark_command(
+    media: Path,
+    models: str = "small",
+    devices: str = "cpu",
+    beam_sizes: str = "1,5",
+    runs: int = 2,
+    start: str = "0",
+    duration: str = "30",
+    source_language: str = "auto",
+    audio_stream: int | None = None,
+    model_cache: Path | None = None,
+    output_dir: Path = Path("outputs"),
+    compute_type: str | None = None,
+):
+    """Measure cached model/device presets on the same local sample, serially."""
+    from local_subs.benchmark import benchmark
+
+    try:
+        settings = load_settings(
+            source_language=source_language,
+            model_cache=model_cache,
+            output_dir=output_dir,
+            compute_type=compute_type,
+        )
+        directory, report = benchmark(
+            media,
+            settings,
+            [x.strip() for x in models.split(",") if x.strip()],
+            [x.strip() for x in devices.split(",") if x.strip()],
+            [int(x.strip()) for x in beam_sizes.split(",") if x.strip()],
+            runs,
+            parse_time(start),
+            parse_time(duration),
+            audio_stream,
+            notify=lambda message: console.print(message, markup=False),
+        )
+        console.print(f"Measured results: {directory / 'benchmark.json'}", markup=False)
+        console.print(
+            "Human meaning/timing/readability ratings remain unverified; OS disk cache is uncontrolled."
+        )
+    except Exception as exc:
+        fail(exc)
+    if any(row["status"] == "failed" for row in report["results"]):
+        raise typer.Exit(1)
+
+
 @app.command()
 def generate(
     media: Path,
