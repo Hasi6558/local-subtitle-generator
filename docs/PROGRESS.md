@@ -1,5 +1,57 @@
 # Progress
 
+## Phase 2: implemented; real dialogue resume verified; movie inference pending
+
+Implemented: disk-backed audio with bounded ownership/context chunks; quiet-cut
+heuristic; chunk checkpoints and hash validation; immutable raw alternatives and
+export revisions; boundary reconciliation/review report; durable states, failure
+stages and retry hints; cancellation; local worker lock; jobs list/show, resume,
+cancel and prepared-audio cleanup. Phase 1 remains available with --single-pass.
+
+Verification on 4 November 2026:
+- Deterministic/service suite: 23 tests passed. Optional inference tests are
+  separately enabled with LOCAL_SUBS_TEST_MEDIA and LOCAL_SUBS_MODEL_CACHE.
+  Default run skips 2 opt-in tests. The new real chunked cancel/resume test passed
+  separately on the 36-second clip (1 passed, 1 deselected, 18.85 seconds).
+- Covered interruption/resume without rewriting finished chunks; cancellation;
+  changed input, track, model, requested/resolved language invalidation; extraction
+  reuse; corrupted checkpoints; simulated disk-full failure; active-worker lock;
+  cleanup/re-extraction; edit preservation; adjacent-only overlap deduplication;
+  repeated phrases retained and boundary conflicts flagged.
+- Ruff, pip check, and git diff --check passed.
+- Real Japanese dialogue video: 650.540 seconds, small snapshot
+  536b0662742c02347bc0e980a01041f333bce120, CPU/int8, beam 5, auto language, VAD on,
+  chunk target 120 seconds, overlap 5 seconds. Resolved ja once. Six chunks produced
+  171 English cues in 267.835 cumulative service seconds including the cancelled
+  attempt. The first completed checkpoint's modification time stayed unchanged
+  after resume. No repeated inference of that chunk.
+- Job: `68bdb01e6e15497f8588b941e7b8ef62`, root `outputs/phase2-dialogue`.
+  Local verification log: `outputs/phase2-real-check.log`.
+- Final-code CLI resume reused all six checkpoints and generated a new immutable
+  export: `exports/966fccc8b8ea4b68bd6734e54cf726a4/subtitles.en.srt` under that job.
+- At a mid-run sample Windows reported working set 838,602,752 bytes and process
+  peak working set 1,062,469,632 bytes. This is one observed process measurement,
+  not a full-movie memory guarantee or a hardware-wide benchmark.
+- Compared all five boundaries against independent 20-second Phase 1 baseline
+  runs, using one cached small model. Boundary times: 119900, 239800, 359700,
+  479600, 601500 ms. Outputs differed in wording/segmentation and every boundary
+  was flagged for review; four also flagged possible truncation. Text similarity
+  is not semantic accuracy. Local results: outputs/phase2-boundary-comparison.json.
+- Full movie preparation: 7,378.389 seconds; global audio stream 0; generated
+  236,108,526-byte disk WAV and 25 bounded chunk intervals. Deliberately stopped
+  before model inference. Job `8ae5ffa300624bc49e7429e07d34bbf2`, root
+  `outputs/phase2-movie`. Reference English SRT remains local and was not used as
+  an automatic translation-quality verdict.
+
+Open acceptance gates: full-length movie inference with observed memory and
+human synchronization/no-drift review; source-language meaning review; boundary
+conflicts/truncation review; medium/GPU and other-language evaluation. Do not
+claim all Phase 2 acceptance checks passed or v0.2 ready. No media/reference
+subtitles/transcripts/model weights were added to Git.
+
+Next action: user review, then confirmation before Phase 3 readability, VTT,
+validation/export commands and measured benchmarks. No Phase 3 implementation.
+
 ## Phase 1: CLI implementation delivered; human acceptance pending
 
 Implemented: track selection using global indexes and normalized language tags;

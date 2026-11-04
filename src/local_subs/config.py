@@ -28,9 +28,13 @@ class Settings(BaseModel):
     beam_size: int = Field(default=5, ge=1, le=20)
     detection_threshold: float = Field(default=0.7, gt=0, le=1)
     detection_attempts: int = Field(default=3, ge=1, le=10)
+    chunk_seconds: int = Field(default=300, ge=5, le=900)
+    overlap_seconds: int = Field(default=5, ge=0, le=30)
 
     @model_validator(mode="after")
     def model_language(self):
+        if self.overlap_seconds * 2 >= self.chunk_seconds:
+            raise ValueError("Overlap must be less than half the chunk duration")
         if self.source_language == "yue" and self.speech_model != "large-v3":
             raise ValueError("Cantonese (yue) requires large-v3")
         return self
