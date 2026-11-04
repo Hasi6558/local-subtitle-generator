@@ -3,12 +3,17 @@ export type Cue = {
   start_ms: number;
   end_ms: number;
   text: string;
+  source_text?: string;
+  source_language?: string;
   flags?: string[];
   source_segment_ids?: string[];
   origin?: string;
   edit_version?: number;
 };
 export type Settings = {
+  pipeline?: "direct" | "contextual";
+  text_model?: string;
+  glossary?: Record<string, string>;
   source_language: string;
   speech_model: string;
   device: string;
@@ -26,11 +31,13 @@ export type Job = {
   settings: Settings;
   audio_stream: number;
   parent_job_id?: string | null;
+  comparison_job_id?: string | null;
   sample_start_ms: number;
   sample_duration_ms: number;
   resolved_source_language?: string | null;
   elapsed_seconds?: number;
   cue_count?: number;
+  translation_progress?: { completed: number; total: number };
   chunks?: { state?: string; owner_end_ms: number }[];
   error?: string | { message: string; retry_hint?: string };
 };
@@ -58,6 +65,7 @@ export type Seed = {
   start_ms: number;
   duration_ms: number;
   parent_job_id?: string;
+  comparison_job_id?: string;
 };
 export const sourcePath = (job: Job) =>
   job.source_path || job.source?.path || "";

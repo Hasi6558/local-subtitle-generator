@@ -27,6 +27,87 @@ async function saved(page: Page) {
   await expect(page.locator(".save-state")).toContainText("Saved");
 }
 
+test("pipeline toggle creates paired results and preserves separate edits", async ({
+  page,
+  request,
+}) => {
+  const job = await fixture(request);
+  await connect(page, job.job_id);
+  await page.getByLabel("English text").fill("My direct-mode correction.");
+  await saved(page);
+  await page
+    .getByRole("button", { name: "Contextual local · Create test…" })
+    .click();
+  await expect(
+    page.getByRole("radio", { name: "Contextual local", exact: true }),
+  ).toBeChecked();
+  await page
+    .getByRole("radio", { name: "Whisper direct", exact: true })
+    .check();
+  await expect(
+    page.getByRole("combobox", { name: "Text model", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("radio", { name: "Contextual local", exact: true })
+    .check();
+  await page
+    .getByRole("combobox", { name: "Text model", exact: true })
+    .selectOption("qwen3-1.7b");
+  await expect(
+    page.getByRole("button", { name: "Create English subtitles →" }),
+  ).toBeDisabled();
+  await page
+    .getByRole("combobox", { name: "Text model", exact: true })
+    .selectOption("qwen3-4b");
+  await page
+    .getByLabel("Names & terminology glossary (JSON)")
+    .fill('{"コーヒー":"coffee"}');
+  await page
+    .getByRole("button", { name: "Inspect video", exact: true })
+    .click();
+  const created = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/jobs") &&
+      response.request().method() === "POST",
+  );
+  await page
+    .getByRole("button", { name: "Create English subtitles →" })
+    .click();
+  const contextual = await (await created).json();
+  expect(contextual.settings.pipeline).toBe("contextual");
+  expect(contextual.comparison_job_id).toBe(job.job_id);
+  expect(contextual.settings.glossary).toEqual({ コーヒー: "coffee" });
+  await request.post(`/__test/finish/${contextual.job_id}`, { headers });
+  await page.goto(`/#/review/${contextual.job_id}`);
+  await expect(page.getByLabel("English text")).toHaveValue(
+    "Proposed replacement text.",
+  );
+  await expect(page.locator(".cue-editor .source-text")).toContainText(
+    "コーヒーをください。",
+  );
+  await expect(page.locator(".pipeline-comparison")).toContainText(
+    "My direct-mode correction.",
+  );
+  await page.getByLabel("English text").fill("My contextual correction.");
+  await saved(page);
+  await page
+    .getByRole("button", { name: "Whisper direct", exact: true })
+    .click();
+  await expect(page.getByLabel("English text")).toHaveValue(
+    "My direct-mode correction.",
+  );
+  await page
+    .getByRole("button", { name: "Contextual local", exact: true })
+    .click();
+  await expect(page.getByLabel("English text")).toHaveValue(
+    "My contextual correction.",
+  );
+  await page.screenshot({
+    path: "test-results/phase6-comparison.png",
+    fullPage: true,
+  });
+});
+
 test("review, autosave, reload, explicit split/merge/undo, seek, keyboard and edited export", async ({
   page,
   request,

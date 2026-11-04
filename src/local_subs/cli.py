@@ -14,11 +14,57 @@ from local_subs.media import parse_time
 app = typer.Typer(no_args_is_help=True)
 models = typer.Typer(no_args_is_help=True)
 app.add_typer(models, name="models")
+text_models = typer.Typer(no_args_is_help=True)
+app.add_typer(text_models, name="text-models")
 jobs = typer.Typer(no_args_is_help=True)
 app.add_typer(jobs, name="jobs")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 console = Console(legacy_windows=False)
+
+
+def read_glossary(path):
+    import json
+
+    return json.loads(path.read_text(encoding="utf-8-sig")) if path else None
+
+
+@text_models.command("prepare")
+def prepare_text_model(
+    model: str = "qwen3-4b",
+    model_cache: Path | None = None,
+    local_files_only: bool = False,
+):
+    """Explicitly prepare pinned local text weights and portable Windows runtime."""
+    from local_subs.text_models import prepare
+
+    try:
+        settings = load_settings(model_cache=model_cache)
+        console.print_json(
+            data=prepare(settings.model_cache, model, offline=local_files_only)
+        )
+    except Exception as exc:
+        fail(exc)
+
+
+@app.command("compare")
+def compare_jobs(first: str, second: str, output_dir: Path = Path("outputs")):
+    """Compare same-range pipeline jobs without assigning a semantic quality score."""
+    from local_subs.comparison import compare
+    from local_subs.resumable import job_directory, read_manifest
+    from local_subs.quality import read_cues
+
+    try:
+        manifests = [
+            read_manifest(job_directory(output_dir, identity))
+            for identity in (first, second)
+        ]
+        cues = [
+            read_cues(Path(m["artifacts"]["generated_cues.json"])) for m in manifests
+        ]
+        console.print_json(data=compare(*manifests, *cues))
+    except Exception as exc:
+        fail(exc)
 
 
 def fail(exc):
@@ -224,6 +270,9 @@ def generate(
     chunk_seconds: int | None = None,
     overlap_seconds: int | None = None,
     single_pass: bool = False,
+    pipeline: str | None = None,
+    text_model: str | None = None,
+    glossary: Path | None = None,
 ):
     """Generate English SRT offline, retaining the original movie timeline."""
     from local_subs.resumable import generate as generate_job
@@ -246,7 +295,14 @@ def generate(
             detection_threshold=detection_threshold,
             chunk_seconds=chunk_seconds,
             overlap_seconds=overlap_seconds,
+            pipeline=pipeline,
+            text_model=text_model,
+            glossary=read_glossary(glossary),
         )
+        if single_pass and settings.pipeline != "direct":
+            raise ValueError(
+                "Contextual translation requires the default chunked pipeline; omit --single-pass"
+            )
         console.print(f"Settings: {settings.model_dump(mode='json')}", markup=False)
         console.print(
             "Sample timestamps remain relative to the original movie. Mixed-language dialogue requires review."
@@ -280,6 +336,9 @@ def resume(
     audio_stream: int | None = None,
     chunk_seconds: int | None = None,
     overlap_seconds: int | None = None,
+    pipeline: str | None = None,
+    text_model: str | None = None,
+    glossary: Path | None = None,
 ):
     """Resume matching completed chunks; changed inference settings invalidate stale results."""
     from local_subs.resumable import resume as resume_job, Cancelled
@@ -295,6 +354,9 @@ def resume(
                 "compute_type": compute_type,
                 "chunk_seconds": chunk_seconds,
                 "overlap_seconds": overlap_seconds,
+                "pipeline": pipeline,
+                "text_model": text_model,
+                "glossary": read_glossary(glossary),
             },
             audio_stream,
             notify=lambda message: console.print(message, markup=False),

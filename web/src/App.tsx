@@ -33,6 +33,9 @@ type ModelInfo = {
   models: { id: string; prepared: boolean }[];
   model_cache: string;
 };
+type TextModels = ModelInfo & { source_languages: string[] };
+const pipelineName = (mode?: string) =>
+  mode === "contextual" ? "Contextual local" : "Whisper direct";
 
 function Logo() {
   return (
@@ -73,6 +76,11 @@ export default function App() {
     [seed, setSeed] = useState<Seed | null>(null),
     [proposal, setProposal] = useState<string | null>(null);
   const [worker, setWorker] = useState(false);
+  const [textModels, setTextModels] = useState<TextModels>({
+    models: [],
+    model_cache: "",
+    source_languages: [],
+  });
   const refresh = useCallback(async () => {
     try {
       const [items, health] = await Promise.all([
@@ -98,10 +106,12 @@ export default function App() {
     void Promise.all([
       api<{ languages: Language[] }>("/languages"),
       api<ModelInfo>("/models"),
+      api<TextModels>("/translation-models"),
     ])
-      .then(([data, prepared]) => {
+      .then(([data, prepared, texts]) => {
         setLanguages(data.languages);
         setModels(prepared);
+        setTextModels(texts);
       })
       .catch((err) => setError(message(err)));
     const timer = setInterval(() => void refresh(), 2000);
@@ -145,6 +155,17 @@ export default function App() {
       setProposal(job.job_id);
       navigate(`/review/${job.parent_job_id}`);
     } else navigate("/");
+  };
+  const testPipeline = (job: Job, pipeline: "direct" | "contextual") => {
+    setSeed({
+      path: sourcePath(job),
+      settings: { ...job.settings, pipeline },
+      audio_stream: job.audio_stream,
+      start_ms: job.sample_start_ms,
+      duration_ms: job.sample_duration_ms,
+      comparison_job_id: job.comparison_job_id || job.job_id,
+    });
+    navigate("/new");
   };
   const id = route.startsWith("/review/") ? route.split("/")[2] : null;
   const selected = jobs.find((job) => job.job_id === id);
@@ -253,12 +274,23 @@ export default function App() {
         )}
         {route === "/new" ? (
           <NewJob
+            key={
+              seed
+                ? `${seed.comparison_job_id || seed.parent_job_id || seed.path}-${seed.settings.pipeline}`
+                : "new"
+            }
             seed={seed}
             languages={languages}
             models={models}
-            refreshModels={async () =>
-              setModels(await api<ModelInfo>("/models"))
-            }
+            textModels={textModels}
+            refreshModels={async () => {
+              const [speech, text] = await Promise.all([
+                api<ModelInfo>("/models"),
+                api<TextModels>("/translation-models"),
+              ]);
+              setModels(speech);
+              setTextModels(text);
+            }}
             onCreated={created}
           />
         ) : selected ? (
@@ -269,6 +301,7 @@ export default function App() {
               jobs={jobs}
               proposalSeed={proposal}
               reprocess={reprocess}
+              testPipeline={testPipeline}
             />
           ) : (
             <>
@@ -411,6 +444,7 @@ function JobRow({ job, refresh }: { job: Job; refresh: () => Promise<void> }) {
         <p>
           {job.resolved_source_language || job.settings.source_language} →
           English <span>·</span> {job.settings.speech_model} <span>·</span>{" "}
+          {pipelineName(job.settings.pipeline)} ·{" "}
           {job.cue_count !== undefined
             ? `${job.cue_count} cues`
             : "Awaiting output"}
@@ -425,6 +459,8 @@ function JobRow({ job, refresh }: { job: Job; refresh: () => Promise<void> }) {
             />
             <p className="muted">
               {label(job.stage || job.state)}
+              {job.translation_progress &&
+                ` · ${job.translation_progress.completed}/${job.translation_progress.total} translated cues`}
               {job.chunks?.length
                 ? ` · ${completed}/${job.chunks.length} chunks`
                 : ""}
@@ -439,6 +475,22 @@ function JobRow({ job, refresh }: { job: Job; refresh: () => Promise<void> }) {
             <summary className="error">Processing needs attention</summary>
             <p className="error">{errorText(job)}</p>
             {typeof job.error === "object" && <p>{job.error.retry_hint}</p>}
+            {job.settings.pipeline === "contextual" &&
+              job.stage === "translation" && (
+                <p>
+                  <a href={`/jobs/${job.job_id}/source-subtitles`} download>
+                    Download source transcript
+                  </a>{" "}
+                  ·{" "}
+                  <a
+                    href={`/jobs/${job.job_id}/source-cues`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Inspect incomplete translation targets
+                  </a>
+                </p>
+              )}
           </details>
         )}
         {error && (
@@ -471,15 +523,26 @@ function NewJob({
   seed,
   languages,
   models,
+  textModels,
   refreshModels,
   onCreated,
 }: {
   seed: Seed | null;
   languages: Language[];
   models: ModelInfo;
+  textModels: TextModels;
   refreshModels: () => Promise<void>;
   onCreated: (job: Job) => Promise<void>;
 }) {
+  const [pipeline, setPipeline] = useState<"direct" | "contextual">(
+    seed?.settings.pipeline || "direct",
+  );
+  const [textModel, setTextModel] = useState(
+    seed?.settings.text_model || "qwen3-4b",
+  );
+  const [glossary, setGlossary] = useState(
+    JSON.stringify(seed?.settings.glossary || {}, null, 2),
+  );
   const [path, setPath] = useState(seed?.path || ""),
     [info, setInfo] = useState<{
       streams: {
@@ -543,12 +606,19 @@ function NewJob({
         start_ms: startMs,
         duration_ms: durationMs,
         parent_job_id: seed?.parent_job_id || null,
+        comparison_job_id: seed?.comparison_job_id || null,
         settings: {
           ...seed?.settings,
           source_language: language,
           speech_model: model,
           device,
           vad,
+          pipeline,
+          text_model: textModel,
+          glossary:
+            pipeline === "contextual"
+              ? JSON.parse(glossary)
+              : seed?.settings.glossary || {},
           compute_type: device === "cpu" ? "int8" : null,
         },
       });
@@ -560,6 +630,14 @@ function NewJob({
     }
   };
   const prepared = models.models.find((item) => item.id === model)?.prepared;
+  const textReady =
+    pipeline === "direct" ||
+    language === "en" ||
+    textModels.models.find((item) => item.id === textModel)?.prepared;
+  const pairSupported =
+    pipeline === "direct" ||
+    language === "auto" ||
+    textModels.source_languages.includes(language);
   return (
     <>
       <header className="page-header">
@@ -576,6 +654,12 @@ function NewJob({
         </div>
       </header>
       <form className="new-form" onSubmit={submit}>
+        {seed?.comparison_job_id && (
+          <div className="notice">
+            Testing the same video, track and range in a separate job. Each
+            result keeps its own edits and exports.
+          </div>
+        )}
         {seed?.parent_job_id && (
           <div className="notice">
             This creates a separate proposal. Your saved corrections stay in the
@@ -592,6 +676,7 @@ function NewJob({
             <div className="path-row">
               <input
                 value={path}
+                readOnly={!!seed?.comparison_job_id}
                 onChange={(e) => {
                   setPath(e.target.value);
                   setInfo(null);
@@ -617,6 +702,7 @@ function NewJob({
               Audio track
               <select
                 value={track}
+                disabled={!!seed?.comparison_job_id}
                 required
                 onChange={(e) => setTrack(e.target.value)}
               >
@@ -640,6 +726,78 @@ function NewJob({
             <span>02</span>
             <h2>Language & quality</h2>
           </div>
+          <fieldset className="pipeline-toggle">
+            <legend>Translation pipeline</legend>
+            {(["direct", "contextual"] as const).map((mode) => (
+              <label key={mode} className={pipeline === mode ? "active" : ""}>
+                <input
+                  type="radio"
+                  name="pipeline"
+                  value={mode}
+                  checked={pipeline === mode}
+                  onChange={() => setPipeline(mode)}
+                />
+                {pipelineName(mode)}
+              </label>
+            ))}
+          </fieldset>
+          <p className="muted">
+            {pipeline === "direct"
+              ? "Whisper translates speech directly into English."
+              : "Whisper transcribes the source language, then a local text model translates with surrounding dialogue. Experimental; review meaning."}
+          </p>
+          {pipeline === "contextual" && (
+            <div className="contextual-options">
+              <label>
+                Text model
+                <select
+                  value={textModel}
+                  onChange={(e) => setTextModel(e.target.value)}
+                >
+                  {textModels.models.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.id} ·{" "}
+                      {item.prepared ? "Prepared" : "Not downloaded"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Names & terminology glossary (JSON)
+                <textarea
+                  rows={3}
+                  value={glossary}
+                  onChange={(e) => setGlossary(e.target.value)}
+                  placeholder={'{"田中": "Tanaka"}'}
+                />
+              </label>
+              {!textReady && (
+                <div className="notice">
+                  Prepare the text model:{" "}
+                  <code>
+                    local-subs text-models prepare {textModel} --model-cache "
+                    {textModels.model_cache}"
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void refreshModels().catch((err) =>
+                        setError(message(err)),
+                      )
+                    }
+                  >
+                    Refresh prepared models
+                  </button>
+                </div>
+              )}
+              {!pairSupported && (
+                <p role="alert">
+                  This source language is not configured for contextual
+                  translation. Choose a supported language or Whisper direct.
+                </p>
+              )}
+            </div>
+          )}
           <div className="form-grid">
             <label>
               Source language
@@ -722,12 +880,17 @@ function NewJob({
           <div className="form-grid">
             <label>
               Start time
-              <input value={start} onChange={(e) => setStart(e.target.value)} />
+              <input
+                value={start}
+                readOnly={!!seed?.comparison_job_id}
+                onChange={(e) => setStart(e.target.value)}
+              />
             </label>
             <label>
               Duration
               <input
                 value={duration}
+                readOnly={!!seed?.comparison_job_id}
                 onChange={(e) => setDuration(e.target.value)}
                 placeholder="Leave blank for the remaining video"
               />
@@ -747,7 +910,14 @@ function NewJob({
           <a href="#/">Back to library</a>
           <button
             className="primary"
-            disabled={busy || !info || !track || !prepared}
+            disabled={
+              busy ||
+              !info ||
+              !track ||
+              !prepared ||
+              !textReady ||
+              !pairSupported
+            }
           >
             {busy ? "Creating…" : "Create English subtitles →"}
           </button>
@@ -762,11 +932,13 @@ function Review({
   jobs,
   proposalSeed,
   reprocess,
+  testPipeline,
 }: {
   job: Job;
   jobs: Job[];
   proposalSeed: string | null;
   reprocess: (job: Job, cue?: Cue) => void;
+  testPipeline: (job: Job, pipeline: "direct" | "contextual") => void;
 }) {
   const editor = useEditor(job.job_id),
     video = useRef<HTMLVideoElement>(null),
@@ -986,6 +1158,13 @@ function Review({
               : label(editor.status)}
         </div>
       </header>
+      <PipelineComparison
+        job={job}
+        jobs={jobs}
+        cue={cue}
+        saved={editor.status === "saved" && !badTimes}
+        testPipeline={testPipeline}
+      />
       {(error || editor.error) && (
         <div className="notice error" role="alert">
           {error || editor.error}
@@ -1347,6 +1526,149 @@ function Review({
   );
 }
 
+function PipelineComparison({
+  job,
+  jobs,
+  cue,
+  saved,
+  testPipeline,
+}: {
+  job: Job;
+  jobs: Job[];
+  cue?: Cue;
+  saved: boolean;
+  testPipeline: (job: Job, mode: "direct" | "contextual") => void;
+}) {
+  const group = job.comparison_job_id || job.job_id;
+  const candidates = jobs.filter(
+    (other) =>
+      other.job_id !== job.job_id &&
+      (other.job_id === group || other.comparison_job_id === group),
+  );
+  const [otherId, setOtherId] = useState(candidates[0]?.job_id || "");
+  const other = jobs.find((item) => item.job_id === otherId);
+  const [otherCues, setOtherCues] = useState<Cue[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setOtherCues([]);
+    if (!otherId || !["completed", "empty"].includes(other?.state || ""))
+      return;
+    let active = true;
+    void api<{ cues: Cue[] }>(`/jobs/${otherId}/cues`)
+      .then((data) => {
+        if (active) setOtherCues(data.cues);
+      })
+      .catch((err) => {
+        if (active) setError(message(err));
+      });
+    return () => {
+      active = false;
+    };
+  }, [otherId, other?.state]);
+  const overlap = cue
+    ? otherCues
+        .filter(
+          (item) =>
+            Math.min(item.end_ms, cue.end_ms) >
+            Math.max(item.start_ms, cue.start_ms),
+        )
+        .map((item) => item.text)
+        .join(" ")
+    : "";
+  return (
+    <section className="panel pipeline-comparison">
+      <div className="section-heading">
+        <h2>Test translation pipelines</h2>
+        <span className="badge">{pipelineName(job.settings.pipeline)}</span>
+      </div>
+      <div
+        className="pipeline-toggle"
+        role="group"
+        aria-label="Review pipeline"
+      >
+        {(["direct", "contextual"] as const).map((mode) => {
+          const current = (job.settings.pipeline || "direct") === mode;
+          const existing = candidates.find(
+            (item) => (item.settings.pipeline || "direct") === mode,
+          );
+          return (
+            <button
+              key={mode}
+              className={current ? "active" : ""}
+              aria-pressed={current}
+              disabled={!saved || current}
+              onClick={() =>
+                existing
+                  ? navigate(`/review/${existing.job_id}`)
+                  : testPipeline(job, mode)
+              }
+            >
+              {pipelineName(mode)}
+              {!current && !existing ? " · Create test…" : ""}
+            </button>
+          );
+        })}
+      </div>
+      <p className="muted">
+        Each pipeline keeps a separate result and saved edits. Compare the
+        selected cue by overlapping time; listen before judging meaning.
+      </p>
+      {!!candidates.length && (
+        <label>
+          Compare with
+          <select value={otherId} onChange={(e) => setOtherId(e.target.value)}>
+            <option value="">Choose a result</option>
+            {candidates.map((item) => (
+              <option key={item.job_id} value={item.job_id}>
+                {pipelineName(item.settings.pipeline)} ·{" "}
+                {item.settings.pipeline === "contextual"
+                  ? item.settings.text_model
+                  : "baseline"}{" "}
+                · {item.state} · {item.job_id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {other && (
+        <>
+          <p className="muted">
+            Current total: {job.elapsed_seconds?.toFixed(1) ?? "—"} s ·
+            Comparison total: {other.elapsed_seconds?.toFixed(1) ?? "—"} s ·
+            Different cue boundaries are expected.
+          </p>
+          <div className="proposal-comparison">
+            <div>
+              <h3>{pipelineName(job.settings.pipeline)}</h3>
+              <p>{cue?.text || "Select a cue"}</p>
+              {cue?.source_text && (
+                <p className="source-text" lang={cue.source_language}>
+                  Source: {cue.source_text}
+                </p>
+              )}
+            </div>
+            <div>
+              <h3>{pipelineName(other.settings.pipeline)}</h3>
+              <p>
+                {["completed", "empty"].includes(other.state)
+                  ? overlap || "No cue overlaps this interval."
+                  : `Job ${other.state}…`}
+              </p>
+              <button
+                disabled={!saved}
+                onClick={() => navigate(`/review/${other.job_id}`)}
+              >
+                Open comparison result
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
+}
+
 function CueFields({
   cue,
   index,
@@ -1401,6 +1723,11 @@ function CueFields({
         <span className="muted">Autosaves after typing</span>
       </div>
       <label>
+        {cue.source_text && (
+          <span className="source-text" lang={cue.source_language}>
+            Source transcript · {cue.source_language}: {cue.source_text}
+          </span>
+        )}
         English text
         <textarea
           value={cue.text}

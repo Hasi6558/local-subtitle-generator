@@ -1,6 +1,7 @@
 """Chunk-level checkpointing; immutable result files and export revisions."""
 
 import errno
+import gc
 import json
 import os
 import shutil
@@ -56,6 +57,7 @@ def prepare(
     notify=lambda _: None,
     queued=False,
     parent_job_id=None,
+    comparison_job_id=None,
 ):
     if start_ms < 0 or (duration_ms is not None and duration_ms <= 0):
         raise ValueError("Start must be nonnegative and duration positive")
@@ -73,6 +75,7 @@ def prepare(
         "state": "queued",
         "execution_mode": "queued" if queued else "foreground",
         "parent_job_id": parent_job_id,
+        "comparison_job_id": comparison_job_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_path": str(path),
         "audio_stream": track["index"],
@@ -308,8 +311,18 @@ def run(
                     "overlap_seconds",
                     "model_cache",
                     "formatting",
+                    "pipeline",
+                    "text_model",
+                    "translation_batch_size",
+                    "translation_context",
+                    "translation_context_tokens",
+                    "translation_max_tokens",
+                    "translation_retries",
+                    "glossary",
                 )
             }
+            if settings.pipeline == "contextual":
+                inference_settings["speech_task"] = "transcribe"
             resolution_key = cache_key(
                 {
                     "extraction": extraction_key,
@@ -406,7 +419,11 @@ def run(
                     save()
                     if speech:
                         inference_began = time.perf_counter()
-                        task = "transcribe" if language == "en" else "translate"
+                        task = (
+                            "transcribe"
+                            if language == "en" or settings.pipeline == "contextual"
+                            else "translate"
+                        )
                         manifest["task"] = task
                         iterator, _ = model.transcribe(
                             audio,
@@ -459,6 +476,65 @@ def run(
             )
             revision = directory / "exports" / uuid4().hex
             revision.mkdir(parents=True)
+            source_artifacts = {}
+            if settings.pipeline == "contextual":
+                from local_subs.subtitles import compose
+                from local_subs.translation import translate_cues
+
+                write_json(revision / "source_raw_segments.json", raw)
+                write_json(revision / "source_cues.json", cues)
+                atomic_text(revision / "subtitles.source.srt", compose(cues, end))
+                source_artifacts = {
+                    name: str(revision / name)
+                    for name in (
+                        "source_raw_segments.json",
+                        "source_cues.json",
+                        "subtitles.source.srt",
+                    )
+                }
+                manifest["artifacts"] = source_artifacts
+                manifest["translation_progress"] = {"completed": 0, "total": len(cues)}
+                write_json(
+                    directory / "translation_report.json",
+                    {"state": "pending", "incomplete_ids": [cue["id"] for cue in cues]},
+                )
+                manifest["state"], manifest["stage"] = "processing", "translation"
+                save()
+                # CTranslate2 holds native memory: release it before loading text weights.
+                if model is not None and hasattr(
+                    getattr(model, "model", None), "unload_model"
+                ):
+                    model.model.unload_model()
+                model = None
+                iterator = None
+                gc.collect()
+
+                def translation_notify(message):
+                    if message.startswith("Translated "):
+                        manifest["translation_progress"]["completed"] = int(
+                            message.split()[1].split("/")[0]
+                        )
+                        save()
+                    notify(message)
+
+                cues, translation_report = timed_call(
+                    "translation",
+                    translate_cues,
+                    cues,
+                    manifest.get("resolved_source_language") or "en",
+                    settings,
+                    directory,
+                    check_cancel,
+                    translation_notify,
+                )
+                manifest["translation_progress"]["completed"] = len(cues)
+                write_json(revision / "translation_report.json", translation_report)
+                source_artifacts["translation_report.json"] = str(
+                    revision / "translation_report.json"
+                )
+                manifest["translation"] = translation_report
+                manifest["state"], manifest["stage"] = "exporting", "quality"
+                save()
             for name, data in [
                 ("raw_segments.json", raw),
                 ("generated_cues.json", cues),
@@ -492,7 +568,7 @@ def run(
                     "formatted_cues.json",
                     "qc.json",
                 )
-            }
+            } | source_artifacts
             check_cancel()
             manifest["cue_count"] = len(cues)
             manifest["result"] = "subtitles" if cues else "empty"
@@ -524,6 +600,16 @@ def run(
                 "type": type(exc).__name__,
                 "retry_hint": hint,
             }
+            if manifest.get("failure_stage") == "translation":
+                try:
+                    report_path = directory / "translation_report.json"
+                    translation_report = json.loads(
+                        report_path.read_text(encoding="utf-8")
+                    )
+                    translation_report.update(state=manifest["state"], error=str(exc))
+                    write_json(report_path, translation_report)
+                except (OSError, ValueError):
+                    pass
             try:
                 save()
             except (OSError, sqlite3.Error):
