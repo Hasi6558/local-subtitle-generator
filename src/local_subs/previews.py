@@ -79,7 +79,9 @@ class PreviewManager:
 
     def request(self, manifest, force=False):
         source = allowed_media(
-            Path(manifest.get("source_path") or manifest["source"]["path"]), self.roots
+            Path(manifest.get("source_path") or manifest["source"]["path"]),
+            self.roots,
+            self.root,
         )
         info = inspect_media(source)
         track = select_track(info, "auto", manifest["audio_stream"])
@@ -125,7 +127,7 @@ class PreviewManager:
     def _prepare(self, data, source, track, info, force):
         temporary = None
         try:
-            allowed_media(source, self.roots)
+            allowed_media(source, self.roots, self.root)
             directory = Path(data["path"]).parent
             directory.mkdir(parents=True, exist_ok=True)
             temporary = directory / f"{uuid4().hex}.part.mp4"

@@ -13,13 +13,16 @@ from local_subs.resumable import Cancelled, run
 from local_subs.worker import active_worker, process_alive
 
 
-def allowed_media(path, roots):
+def allowed_media(path, roots, output_root=None):
     path = path.resolve()
-    if not path.is_file() or not any(
-        path.is_relative_to(root.resolve()) for root in roots
+    from local_subs.media_access import is_selected
+
+    if not path.is_file() or not (
+        any(path.is_relative_to(root.resolve()) for root in roots)
+        or (output_root is not None and is_selected(output_root, path))
     ):
         raise PermissionError(
-            "Media must be an existing file under an approved media root"
+            "Choose this file using Choose video, or use a file under an approved media root"
         )
     return path
 
@@ -33,7 +36,7 @@ def work_once(root, roots, model_loader=load_model, parent_pid=None):
         return False
     directory = root / manifest["job_id"]
     try:
-        allowed_media(Path(manifest["source_path"]), roots)
+        allowed_media(Path(manifest["source_path"]), roots, root)
         settings = Settings.model_validate(manifest["settings"])
         run(
             directory,

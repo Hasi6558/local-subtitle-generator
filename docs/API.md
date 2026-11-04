@@ -6,8 +6,11 @@ Start in PowerShell from the project directory:
 .venv\Scripts\local-subs serve --output-dir outputs --media-root test-video --model-cache models
 ```
 
-Binding is fixed to 127.0.0.1; the default port is 8765. Media must be an existing
-file in an approved root. Repeat `--media-root` to approve other folders. The
+Binding is fixed to 127.0.0.1; the default port is 8765. The native picker can
+select an existing file anywhere on the server PC. Selection grants persistent
+access to that individual file for this output library, including queued workers,
+playback and previews. Manual paths must refer to a selected file or an approved
+root. Repeat `--media-root` to approve entire folders. The
 server controls the output root and model cache; request settings cannot change
 these locations. Models must already be explicitly prepared. There is no upload
 endpoint, account system, hosted inference or public file server. Phase 5 serves
@@ -37,8 +40,8 @@ The API schema at `/openapi.json` is authenticated; CDN-backed docs are disabled
 |---|---|
 | GET /health | Worker health, PID, bounded restart count and monitor error |
 | GET /languages | Backend codes/names, English-only target and evaluation status |
-| POST /media/inspect | Inspect a path under approved roots; body `{ "path": "..." }` |
-| POST /media/pick | Open a native picker on the server PC; returns `{ "path": "..." }` or `{ "path": null }` on cancellation; applies the same approved-root checks |
+| POST /media/inspect | Inspect a selected file or a path under approved roots; body `{ "path": "..." }` |
+| POST /media/pick | Open a native picker anywhere on the server PC and remember the selected file; returns `{ "path": "..." }` or `{ "path": null }` on cancellation |
 | POST /jobs | Register a local path and enqueue a durable job |
 | GET /jobs | List indexed CLI/API jobs in this output root |
 | GET /jobs/{id} | Shared settings, requested/resolved language, checkpoints, state and artifacts |
@@ -54,9 +57,14 @@ The API schema at `/openapi.json` is authenticated; CDN-backed docs are disabled
 Job creation accepts `path`, shared `settings`, optional global `audio_stream`,
 integer `start_ms` and positive `duration_ms`. Track/language/model validation and
 English transcription routing use the CLI core. Invalid settings/media return
-422; paths outside approved roots return 403. Missing jobs/revisions/artifacts
+422; unselected paths outside approved roots return 403. Missing jobs/revisions/artifacts
 return 404. Model loading is deferred to the worker, so a missing cached model
 produces a durable failed job with actionable diagnostics rather than a download.
+
+Selected-file grants live in `.service/selected-media.json` under the output root.
+They identify the resolved path and filesystem identity rather than granting a
+whole parent folder. Replacing an external selected file with a different file
+requires picking it again. Include this metadata when backing up a library.
 
 Cue editing example after completion:
 

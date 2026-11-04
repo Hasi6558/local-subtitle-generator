@@ -228,7 +228,7 @@ def create_app(
 
     @app.post("/media/inspect")
     def inspect(request: InspectRequest):
-        return inspect_media(allowed_media(request.path, roots))
+        return inspect_media(allowed_media(request.path, roots, root))
 
     @app.post("/media/pick")
     def pick_media():
@@ -238,7 +238,11 @@ def create_app(
             raise Conflict("A file picker is already open on this computer")
         try:
             selected = pick_file(roots[0])
-            return {"path": str(allowed_media(selected, roots)) if selected else None}
+            from local_subs.media_access import allow_selected_file
+
+            return {
+                "path": str(allow_selected_file(root, selected)) if selected else None
+            }
         finally:
             picker_lock.release()
 
@@ -271,7 +275,7 @@ def create_app(
 
     @app.post("/jobs", status_code=201)
     def create(request: CreateJob):
-        media = allowed_media(request.path, roots)
+        media = allowed_media(request.path, roots, root)
         if request.parent_job_id:
             parent = job(request.parent_job_id)
             original = parent.get("source_path") or parent.get("source", {}).get("path")
@@ -492,13 +496,13 @@ def create_app(
     def media(job_id: str):
         manifest = job(job_id)
         source = manifest.get("source_path") or manifest.get("source", {}).get("path")
-        return FileResponse(allowed_media(Path(source), roots))
+        return FileResponse(allowed_media(Path(source), roots, root))
 
     @app.get("/jobs/{job_id}/playback")
     def playback(job_id: str):
         manifest = job(job_id)
         source = manifest.get("source_path") or manifest.get("source", {}).get("path")
-        info = inspect_media(allowed_media(Path(source), roots))
+        info = inspect_media(allowed_media(Path(source), roots, root))
         tracks = [
             stream for stream in info["streams"] if stream["codec_type"] == "audio"
         ]

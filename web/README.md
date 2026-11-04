@@ -38,8 +38,10 @@ other roots have separate libraries. Approve other media folders with repeated
   claim reviewed meaning or synchronization.
 
 The picker opens on the computer running the server, requires Python Tk and an
-interactive desktop session, and only accepts files within configured
-`--media-root` folders. **Enter path manually** remains available as a fallback.
+interactive desktop session, and accepts files anywhere on that PC. Each selected
+file is remembered for this library so queued processing and playback work after
+a restart. **Enter path manually** accepts previously selected files or files in
+configured `--media-root` folders.
 Cancelling the picker preserves the current selection. No file is uploaded or copied.
 
 Reprocess selection creates a separate range job linked to its parent. Original

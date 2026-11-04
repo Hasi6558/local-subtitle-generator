@@ -1,5 +1,18 @@
 # Progress
 
+## Follow-up: picker accepts files anywhere on the PC
+
+User requested selection outside configured media roots. Native picker selections
+now persist exact-file grants in the library's .service/selected-media.json.
+Inspection, queued worker dispatch, source playback and preview generation share
+the same grant checks, including after restart. Unselected neighbouring files
+remain outside the grant; replaced files require selection again. Manual paths
+still accept selected files or approved roots. No Phase 7 work started.
+Verified: 19 API/preview tests passed, including external Unicode paths, worker
+dispatch, playback, restart, unrelated-file denial and replacement detection;
+6 fixture browser workflows passed, with 2 opt-in inference tests skipped.
+Build/type check and Ruff passed. No model inference changes.
+
 ## Follow-up: native video file picker
 
 New subtitles now offers Choose video… and automatically inspects the selected
