@@ -26,6 +26,33 @@ def fail(exc):
     raise typer.Exit(1)
 
 
+@app.command()
+def serve(
+    output_dir: Path = Path("outputs"),
+    media_root: list[Path] = typer.Option(None, "--media-root"),
+    model_cache: Path | None = None,
+    port: int = typer.Option(8765, min=1, max=65535),
+):
+    """Run the authenticated local API and one durable queue worker."""
+    import uvicorn
+    from local_subs.api import create_app
+
+    try:
+        application = create_app(
+            output_dir, media_root or [Path.cwd()], model_cache=model_cache, port=port
+        )
+        console.print(f"Local API: http://127.0.0.1:{port}")
+        console.print(
+            f"Token file: {output_dir.resolve() / '.service' / 'token'}", markup=False
+        )
+        console.print(
+            "Media registration is restricted to the configured media folders. Ctrl+C stops the server and checkpoints/cancels active work."
+        )
+        uvicorn.run(application, host="127.0.0.1", port=port, access_log=False)
+    except Exception as exc:
+        fail(exc)
+
+
 def formatting_policy(
     config=None,
     line_width=None,
@@ -283,24 +310,22 @@ def cancel(job_id: str, output_dir: Path = Path("outputs")):
 
 @jobs.command("list")
 def jobs_list(output_dir: Path = Path("outputs")):
-    from local_subs.resumable import read_manifest
+    from local_subs.repository import JobRepository
 
     table = Table()
     table.add_column("Job ID", no_wrap=True)
     for title in ("State", "Completed chunks", "Source"):
         table.add_column(title)
-    for path in sorted(output_dir.glob("*/manifest.json")):
-        try:
-            data = read_manifest(path.parent)
-            chunks = data.get("chunks", [])
-            table.add_row(
-                data["job_id"],
-                data["state"],
-                f"{sum(c.get('state') == 'completed' for c in chunks)}/{len(chunks)}",
-                data.get("source_path", data.get("source", {}).get("path", "")),
-            )
-        except (OSError, ValueError, KeyError):
-            console.print(f"Skipping unreadable manifest: {path}", markup=False)
+    repository = JobRepository(output_dir)
+    repository.import_snapshots()
+    for data in repository.list():
+        chunks = data.get("chunks", [])
+        table.add_row(
+            data["job_id"],
+            data["state"],
+            f"{sum(c.get('state') == 'completed' for c in chunks)}/{len(chunks)}",
+            data.get("source_path", data.get("source", {}).get("path", "")),
+        )
     console.print(table)
 
 

@@ -1,5 +1,45 @@
 # Progress
 
+## Phase 4: local API and persistent worker implemented and verified on CPU
+
+Implemented: loopback FastAPI/Uvicorn server; shared authoritative SQLite job
+repository with migrations; durable queue and worker process; bounded crash
+recovery; cancellation/retry/shutdown; local token/session and origin/host checks;
+approved-root registration/inspection; byte-range media; language/progress routes;
+validated optimistic cue edits and revision-based SRT/VTT/QC export. CLI remains
+available and uses the same job-state repository. JSON manifests are snapshots.
+
+Verification on 4 November 2026:
+- Default suite: 43 tests passed, 3 optional model/HTTP inference tests skipped.
+  New checks cover rejected authorization/origins/hosts/paths, invalid settings,
+  registered range/HEAD/416 responses, concurrent edit conflict, revision exports,
+  queued and active cancellation, retry, silent worker, worker dispatch failure,
+  canonical DB vs stale snapshot, schema-1 upgrade, durable pending queues and
+  active-job shutdown/lock cleanup. Earlier CLI/timestamp/cache/QC checks pass.
+- Ruff, pip check and git diff --check passed. Dependencies locked on Windows/
+  Python 3.11.9: FastAPI 0.162.0, Starlette 1.10.0, Uvicorn 0.54.0; httpx 0.28.1
+  is used for HTTP tests. No model downloads or hosted services.
+- Opt-in real HTTP test passed twice. Final run: 1 passed in 24.65 seconds. A real
+  loopback server queued cached small/CPU/int8 inference on the 36-second Japanese
+  clip, 15-second ownership targets/2-second overlap. Terminated only the owned
+  worker after checkpoint 1; supervisor restarted once and preserved checkpoint
+  mtime, then completed three chunks/13 cues. Manual editing/export, a registered
+  media range request, queued cancellation and full server restart succeeded.
+- Final run made 172 health requests during processing, max 0.063 seconds;
+  this is an observed local test, not a universal HTTP latency guarantee.
+- Local summary: `outputs/phase4-http-final/http-test-summary.json`; job
+  `f282972ef0814ba7a32693c246944ee4`; worker logs and all media/transcripts remain
+  ignored. Test servers/workers were stopped after verification.
+
+Limitations/open gates: full-movie generated-output acceptance, human source-language
+meaning/synchronization review, medium/GPU and other languages. Native inference
+and extraction cancellation is cooperative, not immediate. API export deliberately
+does not rerun coverage VAD. No review UI, upload flow, SSE or browser preview yet.
+
+Next: user review and confirmation. Phase 5 is the review UI; satisfy the plan's
+real-movie generate/resume/validate/export and human timing gate before building it.
+Do not treat Phase 4 CPU/API success as v0.2/full-movie acceptance.
+
 ## Phase 3: implemented; measured short-clip benchmark; acceptance gates open
 
 Implemented: configurable wrapping/readability targets; structural and review QC;

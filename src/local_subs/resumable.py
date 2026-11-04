@@ -4,6 +4,7 @@ import errno
 import json
 import os
 import shutil
+import sqlite3
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from local_subs.inference import POLICY, cache_key, load_model, resolve_language
 from local_subs.jobs import atomic_text, fingerprint, write_json
 from local_subs.media import extract_audio, inspect_media, milliseconds, select_track
 from local_subs.worker import active_worker, worker_lock
+from local_subs.repository import JobRepository
 
 PIPELINE = "chunked-v1"
 
@@ -29,23 +31,30 @@ def job_directory(root, job_id):
     if len(job_id) != 32 or any(c not in "0123456789abcdef" for c in job_id):
         raise ValueError("Invalid job ID; use jobs list")
     directory = root.resolve() / job_id
-    if not (directory / "manifest.json").is_file():
-        raise ValueError("Job not found in this output directory")
+    try:
+        read_manifest(directory)
+    except (KeyError, FileNotFoundError) as exc:
+        raise ValueError("Job not found in this output directory") from exc
     return directory
 
 
 def read_manifest(directory):
-    return json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    repository = JobRepository(directory.parent)
+    try:
+        return repository.get(directory.name)
+    except KeyError:
+        data = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+        return repository.save(data)
 
 
-def generate(
+def prepare(
     path,
     settings,
     audio_stream=None,
     start_ms=0,
     duration_ms=None,
     notify=lambda _: None,
-    model_loader=load_model,
+    queued=False,
 ):
     if start_ms < 0 or (duration_ms is not None and duration_ms <= 0):
         raise ValueError("Start must be nonnegative and duration positive")
@@ -61,6 +70,7 @@ def generate(
         "schema_version": 2,
         "job_id": directory.name,
         "state": "queued",
+        "execution_mode": "queued" if queued else "foreground",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_path": str(path),
         "audio_stream": track["index"],
@@ -68,6 +78,9 @@ def generate(
         "sample_duration_ms": min(duration_ms or total, total - start_ms),
         "source_duration_ms": total,
         "settings": settings.model_dump(mode="json"),
+        "requested_source_language": settings.source_language,
+        "resolved_source_language": None,
+        "target_language": "en",
         "chunks": [],
         "attempts": 0,
         "elapsed_seconds": 0,
@@ -76,6 +89,21 @@ def generate(
     write_json(directory / "manifest.json", manifest)
     notify(
         f'Created job {directory.name}; resume with local-subs resume {directory.name} --output-dir "{settings.output_dir}"'
+    )
+    return directory, manifest
+
+
+def generate(
+    path,
+    settings,
+    audio_stream=None,
+    start_ms=0,
+    duration_ms=None,
+    notify=lambda _: None,
+    model_loader=load_model,
+):
+    directory, manifest = prepare(
+        path, settings, audio_stream, start_ms, duration_ms, notify
     )
     return run(directory, manifest, settings, notify, model_loader)
 
@@ -102,15 +130,26 @@ def resume(
     return run(directory, manifest, settings, notify, model_loader)
 
 
-def run(directory, manifest, settings, notify, model_loader):
+def run(
+    directory,
+    manifest,
+    settings,
+    notify,
+    model_loader,
+    reset_cancel=True,
+    cancelled=None,
+):
     from faster_whisper.vad import get_speech_timestamps
 
     with worker_lock(directory.parent, directory.name):
+        repository = JobRepository(directory.parent)
         write_json(
             directory / "attempts" / f"{uuid4().hex}.json", read_manifest(directory)
         )
         request = directory / "cancel.request"
-        request.unlink(missing_ok=True)
+        if reset_cancel:
+            repository.clear_cancel(directory.name)
+            request.unlink(missing_ok=True)
         began, previous_elapsed = (
             time.perf_counter(),
             manifest.get("elapsed_seconds", 0),
@@ -137,7 +176,11 @@ def run(directory, manifest, settings, notify, model_loader):
             write_json(directory / "manifest.json", manifest)
 
         def check_cancel():
-            if request.exists():
+            if cancelled is not None and cancelled():
+                raise Cancelled("Worker shutdown requested; checkpoints preserved")
+            if request.exists() or repository.get(directory.name).get(
+                "cancel_requested"
+            ):
                 raise Cancelled("Cancellation requested; completed chunks preserved")
 
         manifest["attempts"] += 1
@@ -448,6 +491,7 @@ def run(directory, manifest, settings, notify, model_loader):
                     "qc.json",
                 )
             }
+            check_cancel()
             manifest["cue_count"] = len(cues)
             manifest["result"] = "subtitles" if cues else "empty"
             manifest["state"], manifest["stage"] = "completed", "done"
@@ -480,7 +524,7 @@ def run(directory, manifest, settings, notify, model_loader):
             }
             try:
                 save()
-            except OSError:
+            except (OSError, sqlite3.Error):
                 notify(
                     "Could not persist failure state; last durable manifest and checkpoints remain available"
                 )
@@ -492,9 +536,7 @@ def run(directory, manifest, settings, notify, model_loader):
 
 def cancel(job_id, root):
     directory = job_directory(root, job_id)
-    manifest = read_manifest(directory)
-    if manifest["state"] == "completed":
-        raise ValueError("Job has already completed")
+    manifest = JobRepository(root).request_cancel(job_id)
     atomic_text(directory / "cancel.request", "cancel")
     active = active_worker(root)
     if not active or active["job_id"] != job_id:

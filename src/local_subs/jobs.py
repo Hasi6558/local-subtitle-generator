@@ -34,6 +34,15 @@ def atomic_text(path, text):
 
 
 def write_json(path, data):
+    from local_subs.repository import JobRepository, valid_id
+
+    if (
+        path.name == "manifest.json"
+        and valid_id(path.parent.name)
+        and isinstance(data, dict)
+        and data.get("job_id") == path.parent.name
+    ):
+        data = JobRepository(path.parent.parent).save(data)
     atomic_text(path, json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 

@@ -1,8 +1,9 @@
 # Local subtitle generator
 
 Offline multilingual-to-English movie subtitles, built one phase at a time.
-Phase 3 provides chunked offline English SRT/VTT generation, readability and QC
-reports, checkpoints/resume, formatting-only exports, and local benchmarks.
+Phase 4 adds an authenticated localhost API, durable SQLite queue, a separate
+inference worker, versioned cue editing, and registered-media streaming to the
+existing CLI, subtitle exports/QC, checkpoints/resume and local benchmarks.
 A 10-minute Japanese dialogue test passed; human translation/timing review and
 full-movie inference acceptance remain pending.
 
@@ -217,3 +218,39 @@ $env:LOCAL_SUBS_TEST_MEDIA = $clip.FullName
 $env:LOCAL_SUBS_MODEL_CACHE = "models"
 .venv\Scripts\python -m pytest tests/test_model_integration.py -q
 ```
+
+Local API (no browser UI yet):
+
+```powershell
+.venv\Scripts\local-subs serve --output-dir outputs --media-root test-video --model-cache models
+```
+
+The server binds to `127.0.0.1:8765`; `--port` changes the port. Repeat
+`--media-root` to approve additional folders. Defaults approve only the current
+working directory. A local bearer token is stored in `outputs/.service/token`;
+the token is not printed or sent to a hosted service. See `docs/API.md` for
+PowerShell requests, routes, cue revision conflicts and shutdown/recovery behavior.
+
+CLI and API now use the same authoritative `jobs.sqlite3` in the output root.
+Existing job manifest snapshots migrate automatically when indexed/read. JSON
+manifests remain reproducibility snapshots; editing one no longer overrides a job
+already in SQLite. Cue revisions and queue state live in SQLite; large artifacts
+remain on disk. Keep the database and job folders together. Stop workers before
+copying an output root for backup; include the database and any WAL/SHM companions.
+
+The API queues inference in one separate process per output root. Foreground CLI
+jobs use the same worker lock and are not automatically claimed by the queue.
+API exports select a stored cue revision without inference; they do not rerun VAD,
+so their coverage report says unavailable. CLI export can still perform VAD checks.
+
+Opt-in real HTTP + inference/crash/restart test (uses the same prepared small model):
+
+```powershell
+$env:LOCAL_SUBS_TEST_MEDIA = $clip.FullName
+$env:LOCAL_SUBS_MODEL_CACHE = "models"
+.venv\Scripts\python -m pytest tests/test_api_integration.py -q
+```
+
+This test starts a temporary loopback server, kills only its own inference worker
+after a checkpoint, verifies reuse and HTTP responsiveness, and restarts the server
+to check durable edits. It never downloads a model or uploads sample media.
