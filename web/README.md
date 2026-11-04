@@ -16,7 +16,8 @@ browser storage or URL parameters. Choose the same output root as existing jobs;
 other roots have separate libraries. Approve other media folders with repeated
 `--media-root`. The CLI works without Node, built assets or a browser.
 
-- New subtitles: enter a local path, inspect tracks, select language/model and an
+- New subtitles: click **Choose video…** to open the local system file picker;
+  tracks are inspected automatically. Select language/model and an
   optional sample. Prepared-model status prevents starting with uncached weights;
   refresh it after a CLI download. Files stay in place; there is no upload flow.
 - Library: watch stage/chunk progress, cancel or resume/retry, and review completed
@@ -35,6 +36,11 @@ other roots have separate libraries. Approve other media folders with repeated
 - Export chooses generated revision 0 or a saved edited revision and prepares new
   SRT/VTT downloads. Browser settings choose the destination. “Edited” does not
   claim reviewed meaning or synchronization.
+
+The picker opens on the computer running the server, requires Python Tk and an
+interactive desktop session, and only accepts files within configured
+`--media-root` folders. **Enter path manually** remains available as a fallback.
+Cancelling the picker preserves the current selection. No file is uploaded or copied.
 
 Reprocess selection creates a separate range job linked to its parent. Original
 corrections stay intact. Compare a completed proposal and explicitly apply its

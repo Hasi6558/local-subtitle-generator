@@ -564,11 +564,22 @@ function NewJob({
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [vad, setVad] = useState(seed?.settings.vad ?? true);
-  const inspect = async () => {
+  const inspect = async (chooseFile = false) => {
     setBusy(true);
     setError("");
     try {
-      const result = await post<typeof info>("/media/inspect", { path });
+      let selectedPath = path;
+      if (chooseFile) {
+        const selected = await post<{ path: string | null }>("/media/pick", {});
+        if (!selected.path) return;
+        selectedPath = selected.path;
+        setPath(selectedPath);
+      }
+      setInfo(null);
+      setTrack("");
+      const result = await post<typeof info>("/media/inspect", {
+        path: selectedPath,
+      });
       setInfo(result);
       const audio =
         result?.streams.filter((stream) => stream.codec_type === "audio") || [];
@@ -671,31 +682,57 @@ function NewJob({
             <span>01</span>
             <h2>Your video</h2>
           </div>
-          <label>
-            Local file path
-            <div className="path-row">
-              <input
-                value={path}
-                readOnly={!!seed?.comparison_job_id}
-                onChange={(e) => {
-                  setPath(e.target.value);
-                  setInfo(null);
-                }}
-                placeholder="C:\Movies\video.mp4"
-                required
-              />
+          <div className="path-row">
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !!seed?.comparison_job_id}
+              onClick={() => void inspect(true)}
+            >
+              {busy ? "Working…" : "Choose video…"}
+            </button>
+            {path && (
+              <span
+                style={{ overflowWrap: "anywhere", minWidth: 0 }}
+                title={path}
+              >
+                {fileName(path)}
+              </span>
+            )}
+            {path && (
               <button
                 type="button"
                 onClick={() => void inspect()}
-                disabled={!path || busy}
+                disabled={busy}
               >
-                {busy ? "Working…" : "Inspect video"}
+                Inspect video
               </button>
-            </div>
-          </label>
+            )}
+          </div>
           <p className="muted">
-            Use a path inside a folder approved by your local server. The file
-            stays in place.
+            Choose a file on this computer. Audio tracks are inspected
+            automatically. Your video stays in its original folder.
+          </p>
+          <details>
+            <summary>Enter path manually</summary>
+            <label>
+              Local file path
+              <div className="path-row">
+                <input
+                  value={path}
+                  readOnly={!!seed?.comparison_job_id}
+                  onChange={(e) => {
+                    setPath(e.target.value);
+                    setInfo(null);
+                  }}
+                  placeholder="C:\Movies\video.mp4"
+                />
+              </div>
+            </label>
+          </details>
+          <p className="muted">
+            Choose from a folder approved by your local server. To use another
+            folder, add it with --media-root when starting the server.
           </p>
           {info && (
             <label>

@@ -1,5 +1,17 @@
 # Progress
 
+## Follow-up: native video file picker
+
+New subtitles now offers Choose video… and automatically inspects the selected
+file. The native Tk dialog runs in a separate process on the server PC; API calls
+remain responsive, concurrent dialogs are rejected, cancellation preserves the
+selection and approved-root checks still apply. Manual path entry remains under
+a disclosure for fallback and headless sessions. This does not start Phase 7.
+Verified: web build/type check and Ruff passed; 14 API tests plus 2 picker protocol
+tests passed; all 6 fixture browser workflows passed (2 opt-in real inference
+tests skipped). Browser picker responses were stubbed; native dialog interaction
+has not been manually tested. Python Tk 8.6 is available on this PC.
+
 ## Phase 6: optional contextual translation implemented; human quality gate open
 
 User requested direct Whisper translation remain available with a UI toggle for

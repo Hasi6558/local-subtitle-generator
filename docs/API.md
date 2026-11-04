@@ -38,6 +38,7 @@ The API schema at `/openapi.json` is authenticated; CDN-backed docs are disabled
 | GET /health | Worker health, PID, bounded restart count and monitor error |
 | GET /languages | Backend codes/names, English-only target and evaluation status |
 | POST /media/inspect | Inspect a path under approved roots; body `{ "path": "..." }` |
+| POST /media/pick | Open a native picker on the server PC; returns `{ "path": "..." }` or `{ "path": null }` on cancellation; applies the same approved-root checks |
 | POST /jobs | Register a local path and enqueue a durable job |
 | GET /jobs | List indexed CLI/API jobs in this output root |
 | GET /jobs/{id} | Shared settings, requested/resolved language, checkpoints, state and artifacts |
