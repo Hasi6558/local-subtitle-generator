@@ -7,6 +7,7 @@ import asyncio
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
@@ -43,6 +44,13 @@ class InspectRequest(BaseModel):
     path: Path
 
 
+class AudioExportRequest(InspectRequest):
+    audio_stream: int | None = Field(default=None, ge=0, strict=True)
+    start_ms: int = Field(default=0, ge=0, strict=True)
+    duration_ms: int | None = Field(default=None, gt=0, strict=True)
+    audio_format: Literal["flac", "wav"] = "flac"
+
+
 class EditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=0, strict=True)
@@ -77,6 +85,7 @@ def create_app(
     repository.import_snapshots()
     cache = Path(model_cache or Settings().model_cache).resolve()
     picker_lock = threading.Lock()
+    audio_export_lock = threading.Lock()
     token_path = root / ".service" / "token"
     if token is None:
         if token_path.is_file():
@@ -245,6 +254,50 @@ def create_app(
             }
         finally:
             picker_lock.release()
+
+    @app.post("/audio-exports", status_code=201)
+    def extract_only(request: AudioExportRequest):
+        from local_subs.audio_export import export_audio
+
+        media = allowed_media(request.path, roots, root)
+        if not audio_export_lock.acquire(blocking=False):
+            raise Conflict("An audio export is already running; wait for it to finish")
+        try:
+            directory, metadata = export_audio(
+                media,
+                root / "audio-exports",
+                request.audio_stream,
+                request.start_ms,
+                request.duration_ms,
+                request.audio_format,
+            )
+            return metadata | {
+                "files": [
+                    metadata["audio_file"],
+                    "audio_export.json",
+                    "audio-export.zip",
+                ]
+            }
+        except OSError as exc:
+            raise HTTPException(507, str(exc)) from exc
+        finally:
+            audio_export_lock.release()
+
+    @app.get("/audio-exports/{export_id}/{artifact}")
+    def audio_download(export_id: str, artifact: str):
+        from local_subs.repository import valid_id
+
+        if not valid_id(export_id) or artifact not in (
+            "audio.flac",
+            "audio.wav",
+            "audio_export.json",
+            "audio-export.zip",
+        ):
+            raise HTTPException(404, "Audio export is unavailable")
+        directory = root / "audio-exports" / export_id
+        return FileResponse(
+            safe_output(directory / artifact, directory), filename=artifact
+        )
 
     @app.get("/models")
     def models():

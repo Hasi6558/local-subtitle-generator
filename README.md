@@ -1,6 +1,18 @@
 # Local subtitle generator
 
 Offline multilingual-to-English movie subtitles, built one phase at a time.
+
+**Audio-only export:** in New subtitles, choose a video/audio track and optional
+sample, then use **Export audio only → Extract audio only**. Download FLAC/WAV or
+the ZIP with timing metadata. This uses no translation model and uploads nothing.
+For an independent GPU experiment, follow
+[the manual Colab guide](docs/COLAB_MANUAL_TRANSLATION.md), including copyable
+notebook cells for Large v1 direct translation and English SRT download.
+
+```powershell
+.venv\Scripts\local-subs.exe extract-audio "D:\Movies\video.mkv" --audio-stream 1 --audio-format flac --output-dir outputs/audio-exports
+```
+
 Phase 6 adds optional contextual local translation with a pipeline toggle and
 separate comparison results. Browser review includes playback, cue editing,
 autosave/conflict recovery, split/merge/undo, QC filters and revision exports. The CLI, local API,

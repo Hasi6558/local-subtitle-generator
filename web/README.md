@@ -22,6 +22,12 @@ other roots have separate libraries. Approve other media folders with repeated
   refresh it after a CLI download. Files stay in place; there is no upload flow.
 - Library: watch stage/chunk progress, cancel or resume/retry, and review completed
   results. Model loading has no fabricated exact completion percentage.
+- Audio only: choose the video/track and optional sample range, then click
+  **Extract audio only**. No prepared model is required. Download FLAC (lossless,
+  smaller) or WAV, or the ZIP including source timing metadata. Exports are
+  separate from subtitle jobs and stored under the library's `audio-exports/`.
+  The app does not connect to Colab; [the manual guide](../docs/COLAB_MANUAL_TRANSLATION.md)
+  explains how to create a standalone GPU notebook yourself.
 - Review: select a cue to seek, replay, edit text/times, search and filter QC flags.
   Arrows select cues, Space plays/pauses and R replays outside text fields. Selected
   and playing cues are highlighted; keyboard selection scrolls within the cue list.

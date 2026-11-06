@@ -564,6 +564,15 @@ function NewJob({
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [vad, setVad] = useState(seed?.settings.vad ?? true);
+  const [audioFormat, setAudioFormat] = useState("flac");
+  const [extracting, setExtracting] = useState(false);
+  const [audioExport, setAudioExport] = useState<{
+    export_id: string;
+    audio_file: string;
+    source_name: string;
+    timeline_offset_ms: number;
+    audio_duration_ms: number;
+  } | null>(null);
   const inspect = async (chooseFile = false) => {
     setBusy(true);
     setError("");
@@ -638,6 +647,35 @@ function NewJob({
       setError(message(err));
     } finally {
       setBusy(false);
+    }
+  };
+  const extractOnly = async () => {
+    setBusy(true);
+    setExtracting(true);
+    setError("");
+    try {
+      const startMs = parseClock(start),
+        durationMs = duration ? parseClock(duration) : null;
+      if (
+        !Number.isFinite(startMs) ||
+        (durationMs !== null &&
+          (!Number.isFinite(durationMs) || durationMs <= 0))
+      )
+        throw new Error("Enter a valid sample range before exporting audio.");
+      setAudioExport(
+        await post("/audio-exports", {
+          path,
+          audio_stream: Number(track),
+          start_ms: startMs,
+          duration_ms: durationMs,
+          audio_format: audioFormat,
+        }),
+      );
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(false);
+      setExtracting(false);
     }
   };
   const prepared = models.models.find((item) => item.id === model)?.prepared;
@@ -870,7 +908,7 @@ function NewJob({
           </p>
           {prepared === false && (
             <div className="notice">
-              Prepare this model before starting:{" "}
+              Prepare this model before generating subtitles:{" "}
               <code>
                 local-subs models download {model} --model-cache "
                 {models.model_cache}"
@@ -939,6 +977,61 @@ function NewJob({
             movie offset.
           </p>
         </section>
+        <section className="panel">
+          <h2>Export audio only</h2>
+          <p className="muted">
+            Save the selected audio track using the optional sample range above.
+            No translation model is needed. Files stay on this PC.
+          </p>
+          <div className="path-row">
+            <label>
+              Audio export format
+              <select
+                value={audioFormat}
+                disabled={busy}
+                onChange={(e) => setAudioFormat(e.target.value)}
+              >
+                <option value="flac">FLAC · Lossless, smaller download</option>
+                <option value="wav">WAV · Uncompressed</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={busy || !info || !track}
+              onClick={() => void extractOnly()}
+            >
+              {extracting ? "Extracting audio…" : "Extract audio only"}
+            </button>
+          </div>
+          <p className="muted">
+            Both formats use 16 kHz mono audio for speech recognition. The ZIP
+            includes timing information for playing sample subtitles beside the
+            original video.
+          </p>
+          {audioExport && (
+            <div className="download-links" role="status">
+              <span>
+                Audio ready · {audioExport.source_name} ·{" "}
+                {clock(audioExport.audio_duration_ms)} · Movie offset{" "}
+                {clock(audioExport.timeline_offset_ms)}
+              </span>
+              <a
+                className="button"
+                href={`/audio-exports/${audioExport.export_id}/${audioExport.audio_file}`}
+                download
+              >
+                Download audio
+              </a>
+              <a
+                className="button"
+                href={`/audio-exports/${audioExport.export_id}/audio-export.zip`}
+                download
+              >
+                Download audio + timing ZIP
+              </a>
+            </div>
+          )}
+        </section>
         {error && (
           <p role="alert" className="notice error">
             {error}
@@ -957,7 +1050,7 @@ function NewJob({
               !pairSupported
             }
           >
-            {busy ? "Creating…" : "Create English subtitles →"}
+            {busy ? "Working…" : "Create English subtitles →"}
           </button>
         </div>
       </form>

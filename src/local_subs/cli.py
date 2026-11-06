@@ -72,6 +72,38 @@ def fail(exc):
     raise typer.Exit(1)
 
 
+@app.command("extract-audio")
+def extract_audio_command(
+    media: Path,
+    audio_stream: int | None = None,
+    start: str = "0",
+    duration: str | None = None,
+    audio_format: str = "flac",
+    output_dir: Path = Path("outputs/audio-exports"),
+):
+    """Export a selected audio track locally without loading a model or creating a subtitle job."""
+    from local_subs.audio_export import export_audio
+
+    try:
+        directory, metadata = export_audio(
+            media,
+            output_dir,
+            audio_stream,
+            parse_time(start),
+            parse_time(duration) if duration else None,
+            audio_format,
+        )
+        console.print(f"Audio: {directory / metadata['audio_file']}", markup=False)
+        console.print(
+            f"Audio + timing metadata: {directory / 'audio-export.zip'}", markup=False
+        )
+        console.print(
+            f"Original movie offset: {metadata['timeline_offset_ms']} ms; no upload or model inference performed"
+        )
+    except Exception as exc:
+        fail(exc)
+
+
 @app.command()
 def serve(
     output_dir: Path = Path("outputs"),
