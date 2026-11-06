@@ -1,5 +1,33 @@
 # Progress
 
+## Standalone audio export and manual Colab testing guide
+
+User explicitly requested no Colab/project binding. Added model-free FLAC/WAV
+exports via New subtitles, authenticated API and `extract-audio` CLI. Uses the
+selected global audio stream and optional sample range, preserves delayed starts,
+and includes original-movie offset/checksum metadata in a downloadable ZIP.
+Exports have independent UUID directories; no subtitle job, model loading,
+Google connection or automatic upload is involved. Previous outputs/source media
+remain intact. Conservative disk-space checks cover audio plus the ZIP copy.
+
+docs/COLAB_MANUAL_TRANSLATION.md explains exporting locally and creating six
+copyable notebook cells by hand: install packages, verify GPU, manually upload,
+load pinned Large v1, translate with movie timestamp offsets, download SRT/JSON.
+It documents partial results, independent notebook state, native-library setup,
+no automatic app import, and the lack of hosted-GPU verification. No Phase 7
+alignment or cloud worker integration was introduced.
+
+Verification on 6 November 2026: Python 80 passed / 3 opt-in tests skipped;
+Ruff/pip checks, web build/type check and 9 web unit tests passed. Seven fixture
+browser workflows passed, including unprepared-model audio export/download;
+two opt-in local-inference browser workflows were deliberately skipped. Guide cells all
+parse as Python; its SRT output logic passed nonzero-offset, clipping and failed
+partial-result tests using a fake model. Real local Japanese clip extraction:
+3 seconds from movie offset 5 seconds, 16 kHz mono FLAC, 111,862 bytes, extraction
+plus verification/hash 0.357 seconds. No model was loaded or media uploaded.
+Browser screenshot visually inspected. Colab GPU/native libraries remain for the
+user's manual test; success of local guide tests is not a GPU execution verdict.
+
 ## Follow-up: picker accepts files anywhere on the PC
 
 User requested selection outside configured media roots. Native picker selections

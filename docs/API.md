@@ -42,6 +42,8 @@ The API schema at `/openapi.json` is authenticated; CDN-backed docs are disabled
 | GET /languages | Backend codes/names, English-only target and evaluation status |
 | POST /media/inspect | Inspect a selected file or a path under approved roots; body `{ "path": "..." }` |
 | POST /media/pick | Open a native picker anywhere on the server PC and remember the selected file; returns `{ "path": "..." }` or `{ "path": null }` on cancellation |
+| POST /audio-exports | Extract audio locally without a subtitle job or model; body includes `path`, optional `audio_stream`, `start_ms`, `duration_ms`, `audio_format` (`flac` default or `wav`); returns metadata/files after encoding completes |
+| GET /audio-exports/{export_id}/{artifact} | Download `audio.flac`, `audio.wav`, `audio_export.json` or `audio-export.zip` for a completed export; authenticated, no arbitrary paths |
 | POST /jobs | Register a local path and enqueue a durable job |
 | GET /jobs | List indexed CLI/API jobs in this output root |
 | GET /jobs/{id} | Shared settings, requested/resolved language, checkpoints, state and artifacts |

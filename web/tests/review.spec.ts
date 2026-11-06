@@ -64,6 +64,53 @@ test("choose video inspects automatically and cancellation preserves selection",
   });
 });
 
+test("audio-only export works without a prepared model and preserves sample timing", async ({
+  page,
+  request,
+}) => {
+  const job = await fixture(request);
+  await connect(page, job.job_id);
+  await page
+    .locator(".sidebar")
+    .getByRole("link", { name: /New subtitles/ })
+    .click();
+  await page.route("**/media/pick", (route) =>
+    route.fulfill({ json: { path: job.source_path } }),
+  );
+  await page
+    .getByRole("button", { name: "Choose video…", exact: true })
+    .click();
+  await expect(page.getByLabel("Audio track")).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Model", exact: true })
+    .selectOption("medium");
+  await expect(
+    page.getByRole("button", { name: "Create English subtitles →" }),
+  ).toBeDisabled();
+  await page.getByLabel("Start time", { exact: true }).fill("1.5");
+  await page.getByLabel("Duration", { exact: true }).fill("2");
+  await page
+    .getByRole("button", { name: "Extract audio only", exact: true })
+    .click();
+  await expect(
+    page.getByRole("link", {
+      name: "Download audio + timing ZIP",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Movie offset 00:00:01.500",
+  );
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download audio", exact: true }).click();
+  const file = await downloading;
+  expect(file.suggestedFilename()).toBe("audio.flac");
+  await page.screenshot({
+    path: "test-results/audio-only-export.png",
+    fullPage: true,
+  });
+});
+
 test("pipeline toggle creates paired results and preserves separate edits", async ({
   page,
   request,

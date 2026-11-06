@@ -45,6 +45,58 @@ def create_job(api):
     return response.json()
 
 
+def test_model_free_audio_export_download_auth_paths_and_range(api, tmp_path):
+    import zipfile
+    import io
+
+    client, app, root, media = api
+    count = len(client.get("/jobs").json())
+    request = {"path": str(media), "start_ms": 200, "duration_ms": 600}
+    assert (
+        client.post(
+            "/audio-exports", json=request, headers={"Authorization": ""}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/audio-exports", json=request | {"path": str(tmp_path / "outside.wav")}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/audio-exports", json=request | {"audio_format": "mp3"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post("/audio-exports", json=request | {"start_ms": 2000}).status_code
+        == 422
+    )
+    result = client.post("/audio-exports", json=request)
+    assert result.status_code == 201, result.text
+    data = result.json()
+    assert data["timeline_offset_ms"] == 200 and data["audio_duration_ms"] == 600
+    route = f"/audio-exports/{data['export_id']}"
+    audio = client.get(route + "/audio.flac")
+    assert audio.status_code == 200 and audio.content.startswith(b"fLaC")
+    assert (
+        client.get(route + "/audio.flac", headers={"Authorization": ""}).status_code
+        == 401
+    )
+    assert client.get(route + "/manifest.json").status_code == 404
+    assert client.get("/audio-exports/not-an-id/audio.flac").status_code == 404
+    archive = zipfile.ZipFile(
+        io.BytesIO(client.get(route + "/audio-export.zip").content)
+    )
+    assert (
+        json.loads(archive.read("audio_export.json"))["audio_sha256"]
+        == data["audio_sha256"]
+    )
+    assert len(client.get("/jobs").json()) == count
+
+
 def test_native_picker_selection_cancel_auth_and_access(api, monkeypatch, tmp_path):
     client, app, root, media = api
     monkeypatch.setattr("local_subs.file_picker.pick_file", lambda _: media)

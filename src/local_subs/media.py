@@ -62,7 +62,9 @@ def select_track(info, source_language, index=None):
     )
 
 
-def extract_audio(path, track, info, destination, start_ms=0, duration_ms=None):
+def extract_audio(
+    path, track, info, destination, start_ms=0, duration_ms=None, *, codec="pcm_s16le"
+):
     """Decode on the movie timeline; pad a delayed audio start, never concatenate speech."""
     if not shutil.which("ffmpeg"):
         raise ValueError("ffmpeg missing; install FFmpeg and add bin to PATH")
@@ -91,7 +93,7 @@ def extract_audio(path, track, info, destination, start_ms=0, duration_ms=None):
             "-ar",
             "16000",
             "-c:a",
-            "pcm_s16le",
+            codec,
             str(destination),
         ],
         capture_output=True,
